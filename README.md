@@ -1,96 +1,164 @@
-# Welcome to your Lovable project
+# Employee App
 
-## Project info
+## Project Overview
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+Employee App is a full-stack web application built to manage employee-related operations efficiently.
+It includes a modern frontend built with React and a backend API built with Node.js connected to a PostgreSQL database.
 
-## How can I edit this code?
+---
 
-There are several ways of editing your application.
+## Project Setup
 
-**Use Lovable**
+### 1. Clone the Repository
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
+```bash
 git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
 cd <YOUR_PROJECT_NAME>
+```
 
-# Step 3: Install the necessary dependencies.
-npm i
+---
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+### 2. Install Frontend Dependencies
+
+```bash
+npm install
+```
+
+---
+
+### 3. Start Frontend Development Server
+
+```bash
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+The frontend will start on:
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+```
+http://localhost:8080
+```
 
-**Use GitHub Codespaces**
+---
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Backend Setup
 
-## Backend & database (required for full app)
+The frontend communicates with a **Node.js backend** that uses **PostgreSQL** as the database.
 
-The frontend talks to a **Node.js backend** that uses **PostgreSQL**.
+### 1. Navigate to Backend
 
-1. **Backend setup**
-   ```sh
-   cd backend
-   cp .env.example .env
-   # Edit .env and set DATABASE_URL (e.g. postgresql://user:password@localhost:5432/yourdb)
-   npm install
-   npm run migrate   # run once to create tables
-   npm run dev       # start API on http://localhost:4000
-   ```
+```bash
+cd backend
+```
 
-2. **Frontend env**
-   - Root `.env` should have `VITE_API_URL=http://localhost:4000/api` (see `.env.example`).
-   - If missing, the app defaults to `http://localhost:4000/api`.
+### 2. Setup Environment Variables
 
-3. **Run both**
-   - Terminal 1: `cd backend && npm run dev`
-   - Terminal 2: `npm run dev` (frontend on http://localhost:8080)
+```bash
+cp .env.example .env
+```
 
-## What technologies are used for this project?
+Edit the `.env` file and configure your PostgreSQL database connection:
 
-This project is built with:
+```
+DATABASE_URL=postgresql://user:password@localhost:5432/yourdb
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-- Node.js backend + PostgreSQL (API and database)
+---
 
-## How can I deploy this project?
+### 3. Install Backend Dependencies
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+```bash
+npm install
+```
 
-## Can I connect a custom domain to my Lovable project?
+---
 
-Yes, you can!
+### 4. Run Database Migrations
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+```bash
+npm run migrate
+```
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+This will create the required database tables.
+
+---
+
+### 5. Start Backend Server
+
+```bash
+npm run dev
+```
+
+Backend will run on:
+
+```
+http://localhost:4000
+```
+
+---
+
+## Frontend Environment Variables
+
+Create a `.env` file in the root directory:
+
+```
+VITE_API_URL=http://localhost:4000/api
+```
+
+If this variable is not set, the application will automatically use the default API URL.
+
+---
+
+## Running the Full Application
+
+Run both frontend and backend simultaneously.
+
+**Terminal 1**
+
+```bash
+cd backend
+npm run dev
+```
+
+**Terminal 2**
+
+```bash
+npm run dev
+```
+
+---
+
+
+
+### Database
+
+* PostgreSQL
+
+---
+
+## Features
+
+* Employee management system
+* Modern responsive UI
+* RESTful API architecture
+* PostgreSQL database integration
+* Full-stack TypeScript support
+
+---
+
+## Project Structure
+
+```
+project-root
+│
+├── backend          # Node.js API
+├── src              # React frontend source
+├── public           # Static assets
+├── docs             # Documentation
+└── README.md
+```
+
+---
+
+## License
+
+This project is for learning and development purposes.
