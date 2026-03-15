@@ -100,11 +100,6 @@ export const api = {
 };
 
 export const authApi = {
-  signUp: (email: string, password: string, fullName: string) =>
-    request<{ user: { id: string; email: string; user_metadata?: { full_name?: string } }; session: { access_token: string; refresh_token: string; user: { id: string; email: string; first_login?: boolean; role?: string; external_role?: string | null; external_sub_role?: string | null; userType?: string; manager_id?: string | null }; expires_in: number } }>(
-      '/auth/signup',
-      { method: 'POST', body: JSON.stringify({ email, password, fullName }), skipAuth: true }
-    ),
   signIn: (email: string, password: string) =>
     request<{ user: { id: string; email: string; first_login?: boolean; user_metadata?: { full_name?: string } }; session: { access_token: string; refresh_token: string; user: { id: string; email: string; first_login?: boolean; role?: string; external_role?: string | null; external_sub_role?: string | null; userType?: string; manager_id?: string | null }; expires_in: number } }>(
       '/auth/login',

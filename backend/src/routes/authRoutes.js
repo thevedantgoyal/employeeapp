@@ -7,17 +7,6 @@ import { validate } from '../middleware/validate.js';
 const router = Router();
 
 router.post(
-  '/signup',
-  [
-    body('email').isEmail().normalizeEmail(),
-    body('password').isLength({ min: 6 }),
-    body('fullName').optional().trim().isLength({ max: 255 }),
-  ],
-  validate,
-  authController.signUp
-);
-
-router.post(
   '/login',
   [
     body('email').isEmail().normalizeEmail(),

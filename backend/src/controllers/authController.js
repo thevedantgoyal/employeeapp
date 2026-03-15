@@ -1,21 +1,6 @@
 import * as authService from '../services/authService.js';
 
 /**
- * POST /auth/signup
- * Body: { email, password, fullName }
- * Response: { data: { user, session }, error: null } (Supabase-like)
- */
-export async function signUp(req, res, next) {
-  try {
-    const { email, password, fullName } = req.body;
-    const { user, session } = await authService.signUp(email, password, fullName);
-    res.status(201).json({ data: { user, session }, error: null });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
  * POST /auth/login
  * Body: { email, password }
  * Response: { data: { user, session }, error: null }

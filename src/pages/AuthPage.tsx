@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Mail, Lock, User } from "lucide-react";
+import { Eye, EyeOff, Mail, Lock } from "lucide-react";
 import { ConnectPlusLoader } from "@/components/ui/ConnectPlusLoader";
 import { z } from "zod";
 import { useAuth } from "@/contexts/AuthContext";
@@ -21,14 +21,9 @@ const loginSchema = z.object({
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
-const signupSchema = loginSchema.extend({
-  fullName: z.string().min(2, "Name must be at least 2 characters"),
-});
-
 const AuthPage = () => {
   const navigate = useNavigate();
-  const { user, signIn, signUp, signInWithMicrosoft, resetPassword, loading } = useAuth();
-  const [isLogin, setIsLogin] = useState(true);
+  const { user, signIn, signInWithMicrosoft, resetPassword, loading } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isMicrosoftLoading, setIsMicrosoftLoading] = useState(false);
@@ -40,7 +35,6 @@ const AuthPage = () => {
   const [formData, setFormData] = useState({
     email: "",
     password: "",
-    fullName: "",
   });
   
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -118,11 +112,7 @@ const AuthPage = () => {
 
   const validateForm = () => {
     try {
-      if (isLogin) {
-        loginSchema.parse(formData);
-      } else {
-        signupSchema.parse(formData);
-      }
+      loginSchema.parse(formData);
       setErrors({});
       return true;
     } catch (err) {
@@ -158,14 +148,9 @@ const AuthPage = () => {
         // Ignore no_token_request_cache_error / state_not_found when no redirect is pending.
       }
       const loginRequest = { scopes: ["User.Read", "openid", "profile"] };
-      const popupWidth = 500;
-      const popupHeight = 650;
-      const left = Math.round((window.screen.width - popupWidth) / 2);
-      const top = Math.round((window.screen.height - popupHeight) / 2);
-      const popupWindowFeatures = `width=${popupWidth},height=${popupHeight},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=yes`;
       let result: { idToken?: string };
       try {
-        result = await msal.loginPopup(loginRequest, { popupWindowFeatures });
+        result = await msal.loginPopup(loginRequest);
       } catch (popupErr) {
         console.error("[MSAL] loginPopup error (full):", popupErr);
         console.error("[MSAL] loginPopup error message:", popupErr instanceof Error ? popupErr.message : String(popupErr));
@@ -245,30 +230,16 @@ const AuthPage = () => {
     setIsSubmitting(true);
     
     try {
-      if (isLogin) {
-        const { error, user: loggedInUser } = await signIn(formData.email, formData.password);
-        if (error) {
-          if (error.message.includes("Invalid login credentials")) {
-            toast.error("Invalid email or password. Please try again.");
-          } else {
-            toast.error(error.message);
-          }
+      const { error, user: loggedInUser } = await signIn(formData.email, formData.password);
+      if (error) {
+        if (error.message.includes("Invalid login credentials")) {
+          toast.error("Invalid email or password. Please try again.");
         } else {
-          toast.success("Welcome back!");
-          navigateAfterLogin(loggedInUser ?? null);
+          toast.error(error.message);
         }
       } else {
-        const { error, user: signedUpUser } = await signUp(formData.email, formData.password, formData.fullName);
-        if (error) {
-          if (error.message.includes("already registered")) {
-            toast.error("This email is already registered. Please sign in instead.");
-          } else {
-            toast.error(error.message);
-          }
-        } else {
-          toast.success("Account created successfully!");
-          navigateAfterLogin(signedUpUser ?? null);
-        }
+        toast.success("Welcome back!");
+        navigateAfterLogin(loggedInUser ?? null);
       }
     } catch (err) {
       toast.error("An unexpected error occurred. Please try again.");
@@ -286,9 +257,7 @@ const AuthPage = () => {
           animate={{ opacity: 1, y: 0 }}
           className="text-center mb-8"
         >
-          <h1 className="text-lg font-semibold">
-            {isLogin ? "Login" : "Create Account"}
-          </h1>
+          <h1 className="text-lg font-semibold">Login</h1>
         </motion.div>
 
         {/* Hero Image */}
@@ -313,18 +282,14 @@ const AuthPage = () => {
           transition={{ delay: 0.2 }}
           className="mb-8"
         >
-          <h2 className="text-2xl font-display font-bold mb-2">
-            {isLogin ? "Welcome Back" : "Join Us"}
-          </h2>
+          <h2 className="text-2xl font-display font-bold mb-2">Welcome Back</h2>
           <p className="text-muted-foreground">
-            {isLogin
-              ? "Log in to continue your journey of growth and reflection."
-              : "Create an account to start tracking your performance."}
+            Log in to continue your journey of growth and reflection.
           </p>
         </motion.div>
 
         {/* Microsoft Sign In */}
-        {isLogin && AZURE_CLIENT_ID && (
+        {AZURE_CLIENT_ID && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -367,7 +332,7 @@ const AuthPage = () => {
           </motion.div>
         )}
 
-        {isLogin && AZURE_CLIENT_ID && (
+        {AZURE_CLIENT_ID && (
           <div className="flex items-center gap-3 mb-4">
             <div className="flex-1 h-px bg-border" />
             <span className="text-sm text-muted-foreground">or</span>
@@ -383,24 +348,6 @@ const AuthPage = () => {
           onSubmit={handleSubmit}
           className="space-y-4 flex-1"
         >
-          {!isLogin && (
-            <div>
-              <div className="relative">
-                <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Full Name"
-                  value={formData.fullName}
-                  onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                  className="w-full pl-12 pr-4 py-4 rounded-xl border border-border bg-muted/50 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-              {errors.fullName && (
-                <p className="text-destructive text-sm mt-1">{errors.fullName}</p>
-              )}
-            </div>
-          )}
-
           <div>
             <div className="relative">
               <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
@@ -442,15 +389,13 @@ const AuthPage = () => {
             {errors.password && (
               <p className="text-destructive text-sm mt-1">{errors.password}</p>
             )}
-            {isLogin && (
-              <button
+            <button
                 type="button"
                 onClick={() => setIsForgotPassword(true)}
                 className="text-sm text-primary hover:underline mt-1"
               >
-                Forgot Password?
+                {/* Forgot Password? */}
               </button>
-            )}
           </div>
 
           <div className="pt-4">
@@ -459,7 +404,7 @@ const AuthPage = () => {
               disabled={isSubmitting}
               className="w-full py-6 text-base font-semibold rounded-xl"
             >
-              {isSubmitting ? <ConnectPlusLoader variant="button" message={isLogin ? "Signing in..." : "Creating account..."} /> : isLogin ? "Sign In" : "Create Account"}
+              {isSubmitting ? <ConnectPlusLoader variant="button" message="Signing in..." /> : "Sign In"}
             </Button>
           </div>
         </motion.form>
@@ -518,27 +463,6 @@ const AuthPage = () => {
             </motion.div>
           </motion.div>
         )}
-
-        {/* Toggle */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.4 }}
-          className="text-center mt-6"
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setIsLogin(!isLogin);
-              setErrors({});
-            }}
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {isLogin
-              ? "Don't have an account? Sign up"
-              : "Already have an account? Sign in"}
-          </button>
-        </motion.div>
 
         {/* Footer */}
         <motion.p
