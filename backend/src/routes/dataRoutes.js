@@ -157,15 +157,16 @@ router.get('/:table', async (req, res, next) => {
     );
 
     if (table === 'tasks') {
-      const { rows: recentRows } = await query(
-        'SELECT id, title, status, assigned_by, assigned_to, project_id, created_at FROM tasks ORDER BY created_at DESC LIMIT 10'
-      );
-      console.log('[Tasks] all recent tasks (DB):', recentRows);
-      console.log('[Tasks] currentManagerProfileId:', normalizeUUID(req.profileId));
-      console.log('[Tasks] query result count:', result.data ? result.data.length : 0);
-      if (result.data && result.data.length > 0) {
-        console.log('[Tasks] first returned task:', { id: result.data[0].id, title: result.data[0].title, assigned_by: result.data[0].assigned_by, assigned_to: result.data[0].assigned_to });
-      }
+      const currentUserId = req.userId;
+      const rows = result.data || [];
+      console.log('[Tasks] currentUserId:', currentUserId);
+      console.log('[Tasks] task count:', rows.length);
+      console.log('[Tasks] tasks:', rows.map((t) => ({
+        id: t.id,
+        title: t.title,
+        assigned_by: t.assigned_by,
+        assigned_to: t.assigned_to,
+      })));
     }
     if (table === 'profiles' && result.data) {
       console.log('[DirectReports] query result count:', result.data.length);

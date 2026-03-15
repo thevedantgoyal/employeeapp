@@ -37,7 +37,9 @@ import {
 } from "@/hooks/useTaskManagement";
 import { useInsertActivityLog } from "@/hooks/useTaskActivityLogs";
 import { useTaskTagAssignmentsForTaskIds } from "@/hooks/useTaskTags";
-import { useProjectMembers, useManagerProjects } from "@/hooks/useProjectManagement";
+import { useAuth } from "@/contexts/AuthContext";
+import { useProjectMembersForTask, useManagerProjects } from "@/hooks/useProjectManagement";
+import { useAssignableAll } from "@/hooks/useTaskManagement";
 import { TaskStatusBadge } from "@/components/tasks/TaskStatusBadge";
 import { TaskDetailDrawer, TaskDetailData } from "@/components/tasks/TaskDetailDrawer";
 import { KanbanBoard } from "@/components/kanban/KanbanBoard";
@@ -108,11 +110,15 @@ export const TaskManagement = () => {
     taskType: "project_task" | "separate_task";
   } | null>(null);
 
+  const { user } = useAuth();
+  const isSubadmin = (user as { userType?: string; external_role?: string } | null)?.userType === "SENIOR_MANAGER"
+    || (user as { external_role?: string } | null)?.external_role === "subadmin";
   const { data: teamMembers = [], isLoading: membersLoading } = useTeamMembers();
   const { data: assignableUsers = [], isLoading: assignableLoading } = useAssignableUsers();
+  const { data: assignableAll = [], isLoading: assignableAllLoading } = useAssignableAll();
   const { data: projects = [], isLoading: projectsLoading } = useProjects();
   const { data: managerProjects = [] } = useManagerProjects();
-  const { data: projectMembers = [] } = useProjectMembers(taskType === "project_task" ? projectId : null);
+  const { data: projectMembersForTask = [] } = useProjectMembersForTask(taskType === "project_task" ? projectId : null);
   const { data: tasks = [], isLoading: tasksLoading } = useManagedTasks();
   const taskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
   const { data: taskTagMap } = useTaskTagAssignmentsForTaskIds(taskIds);
@@ -128,19 +134,35 @@ export const TaskManagement = () => {
 
   const assignees = useMemo(() => teamMembers.map(m => ({ id: m.id, name: m.full_name })), [teamMembers]);
 
-  // For standalone task: assignable list (employees + managers); for project task: project members or team members
+  // Project task: only project members (from API, excludes self). Standalone: subadmin → assignable/all, manager → assignable (direct reports + peer managers).
   const availableEmployees = useMemo(() => {
-    if (taskType === "project_task" && projectId) return projectMembers;
-    if (taskType === "separate_task") return assignableUsers as { id: string; full_name: string; job_title?: string | null; employee_code?: string | null; avatar_url?: string | null }[];
+    if (taskType === "project_task" && projectId) return projectMembersForTask;
+    if (taskType === "separate_task") {
+      return (isSubadmin ? assignableAll : assignableUsers) as { id: string; full_name: string; job_title?: string | null; employee_code?: string | null; avatar_url?: string | null; external_role?: string; external_sub_role?: string | null }[];
+    }
     return teamMembers;
-  }, [taskType, projectId, projectMembers, assignableUsers, teamMembers]);
+  }, [taskType, projectId, projectMembersForTask, isSubadmin, assignableAll, assignableUsers, teamMembers]);
 
   const assignableGrouped = useMemo(() => {
-    if (taskType !== "separate_task" || !assignableUsers.length) return { managers: [] as AssignableUser[], employees: [] as AssignableUser[] };
-    const managers = assignableUsers.filter((u) => (u.external_role || "").toLowerCase() === "manager");
-    const employees = assignableUsers.filter((u) => (u.external_role || "").toLowerCase() !== "manager");
-    return { managers, employees };
-  }, [taskType, assignableUsers]);
+    if (taskType !== "separate_task") return { seniorManagers: [] as (AssignableUser & { external_sub_role?: string | null })[], managers: [] as AssignableUser[], employees: [] as AssignableUser[] };
+    if (isSubadmin && assignableAll.length) {
+      const seniorManagers = assignableAll.filter((u) => (u.external_role || "").toLowerCase() === "subadmin" || (u.external_sub_role != null && String(u.external_sub_role).trim() !== ""));
+      const managers = assignableAll.filter((u) => (u.external_role || "").toLowerCase() === "manager");
+      const employees = assignableAll.filter((u) => (u.external_role || "").toLowerCase() !== "manager" && (u.external_role || "").toLowerCase() !== "subadmin" && !(u.external_sub_role != null && String(u.external_sub_role).trim() !== ""));
+      return { seniorManagers, managers, employees };
+    }
+    if (assignableUsers.length) {
+      const managers = assignableUsers.filter((u) => u.external_role === "manager");
+      const employees = assignableUsers.filter((u) => u.external_role === "employee");
+      return { seniorManagers: [] as AssignableUser[], managers, employees };
+    }
+    return { seniorManagers: [] as AssignableUser[], managers: [] as AssignableUser[], employees: [] as AssignableUser[] };
+  }, [taskType, isSubadmin, assignableAll, assignableUsers]);
+
+  const selectedProjectName = useMemo(() => {
+    if (taskType !== "project_task" || !projectId) return null;
+    return managerProjects.find((p) => p.id === projectId)?.name ?? projects.find((p) => p.id === projectId)?.name ?? null;
+  }, [taskType, projectId, managerProjects, projects]);
 
   const resetForm = () => {
     setTitle("");
@@ -164,12 +186,17 @@ export const TaskManagement = () => {
     const q = assigneeSearch.trim().toLowerCase();
     if (!q) return assignableGrouped;
     return {
+      seniorManagers: assignableGrouped.seniorManagers.filter((m) => m.full_name.toLowerCase().includes(q)),
       managers: assignableGrouped.managers.filter((m) => m.full_name.toLowerCase().includes(q)),
       employees: assignableGrouped.employees.filter((m) => m.full_name.toLowerCase().includes(q)),
     };
   }, [assignableGrouped, assigneeSearch]);
 
-  const membersLoadingResolved = taskType === "separate_task" ? assignableLoading : membersLoading;
+  const membersLoadingResolved = taskType === "separate_task"
+    ? (isSubadmin ? assignableAllLoading : assignableLoading)
+    : taskType === "project_task" && projectId
+      ? false
+      : membersLoading;
 
   const runCreateTask = async (payload: {
     title: string;
@@ -589,13 +616,92 @@ export const TaskManagement = () => {
                     </button>
                   </div>
                   <div className="max-h-[280px] overflow-y-auto p-1">
-                    {taskType === "separate_task" ? (
-                      assignableLoading ? (
+                    {taskType === "project_task" && projectId ? (
+                      <>
+                        {selectedProjectName && (
+                          <p className="text-xs font-medium text-muted-foreground px-2 py-1.5 sticky top-0 bg-background border-b border-border/50">
+                            Assigning within: {selectedProjectName}
+                          </p>
+                        )}
+                        {filteredEmployees.length === 0 ? (
+                          <p className="text-sm text-muted-foreground py-4 text-center">No project members match</p>
+                        ) : (
+                          filteredEmployees.map((member) => (
+                            <label
+                              key={member.id}
+                              className={cn(
+                                "flex items-center gap-2 py-2 px-2 rounded-lg cursor-pointer",
+                                assignedToIds.includes(member.id) ? "bg-primary/10" : "hover:bg-muted/60"
+                              )}
+                            >
+                              <Checkbox
+                                checked={assignedToIds.includes(member.id)}
+                                onCheckedChange={(checked) => {
+                                  setAssignedToIds((prev) =>
+                                    checked ? [...prev, member.id] : prev.filter((x) => x !== member.id)
+                                  );
+                                }}
+                              />
+                              <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 text-xs font-medium text-primary">
+                                {(member as { avatar_url?: string }).avatar_url ? (
+                                  <img src={(member as { avatar_url: string }).avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
+                                ) : (
+                                  (member.full_name || "?").slice(0, 2).toUpperCase()
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium truncate">{member.full_name}</p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  {[member.job_title, member.employee_code].filter(Boolean).join(" · ") || "—"}
+                                </p>
+                              </div>
+                            </label>
+                          ))
+                        )}
+                      </>
+                    ) : taskType === "separate_task" ? (
+                      membersLoadingResolved ? (
                         <div className="flex items-center justify-center py-8">
                           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                         </div>
-                      ) : (filteredAssignableGrouped.managers.length > 0 || filteredAssignableGrouped.employees.length > 0) ? (
+                      ) : (filteredAssignableGrouped.seniorManagers.length > 0 || filteredAssignableGrouped.managers.length > 0 || filteredAssignableGrouped.employees.length > 0) ? (
                         <>
+                          {filteredAssignableGrouped.seniorManagers.length > 0 && (
+                            <div className="mb-2">
+                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1.5 border-b border-border/50">Senior Managers</p>
+                              {filteredAssignableGrouped.seniorManagers.map((member) => (
+                                <label
+                                  key={member.id}
+                                  className={cn(
+                                    "flex items-center gap-2 py-2 px-2 rounded-lg cursor-pointer",
+                                    assignedToIds.includes(member.id) ? "bg-primary/10" : "hover:bg-muted/60"
+                                  )}
+                                >
+                                  <Checkbox
+                                    checked={assignedToIds.includes(member.id)}
+                                    onCheckedChange={(checked) => {
+                                      setAssignedToIds((prev) =>
+                                        checked ? [...prev, member.id] : prev.filter((x) => x !== member.id)
+                                      );
+                                    }}
+                                  />
+                                  <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 text-xs font-medium text-primary">
+                                    {member.avatar_url ? (
+                                      <img src={member.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
+                                    ) : (
+                                      (member.full_name || "?").slice(0, 2).toUpperCase()
+                                    )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium truncate">{member.full_name}</p>
+                                    <p className="text-xs text-muted-foreground truncate">
+                                      {(member as { external_sub_role?: string }).external_sub_role || "Senior"}
+                                    </p>
+                                  </div>
+                                </label>
+                              ))}
+                            </div>
+                          )}
                           {filteredAssignableGrouped.managers.length > 0 && (
                             <div className="mb-2">
                               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1.5 border-b border-border/50">Managers</p>
@@ -673,7 +779,9 @@ export const TaskManagement = () => {
                         <p className="text-sm text-muted-foreground py-4 text-center">No one match</p>
                       )
                     ) : (
-                      filteredEmployees.length === 0 ? (
+                      taskType === "project_task" && !projectId ? (
+                        <p className="text-sm text-muted-foreground py-4 text-center">Select a project first</p>
+                      ) : filteredEmployees.length === 0 ? (
                         <p className="text-sm text-muted-foreground py-4 text-center">No employees match</p>
                       ) : (
                         filteredEmployees.map((member) => (

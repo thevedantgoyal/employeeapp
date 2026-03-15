@@ -41,11 +41,55 @@ router.get('/me/details', async (req, res, next) => {
 
 /**
  * GET /users/assignable
- * Returns profiles that can be assigned tasks: employees + regular managers (no subadmin, no external_sub_role).
- * Excludes current user. Used for standalone task assignee list.
- * Parameter: current user id from auth. Returns: id (profile id), user_id, full_name, job_title, avatar_url, employee_code, department, external_role.
+ * Manager standalone task: assignee list for "Separate Task". Returns managers and employees only.
+ * Excludes self, subadmins, and anyone with external_sub_role set. Uses users + profiles; role from profile or user_roles.
+ * Returns: id (profile id for assignment), user_id, full_name, job_title, avatar_url, employee_code, external_role.
  */
 router.get('/assignable', async (req, res, next) => {
+  try {
+    const currentUserId = req.userId;
+    if (!currentUserId) {
+      return res.status(401).json({ data: null, error: { message: 'Authentication required' } });
+    }
+    const { rows } = await query(
+      `SELECT
+         p.id,
+         u.id AS user_id,
+         COALESCE(
+           NULLIF(LOWER(TRIM(p.external_role)), ''),
+           (SELECT LOWER(ur.role::text) FROM user_roles ur WHERE ur.user_id = u.id AND ur.role IN ('manager', 'employee') LIMIT 1),
+           'employee'
+         ) AS external_role,
+         p.full_name,
+         p.job_title,
+         p.avatar_url,
+         p.employee_code,
+         p.department
+       FROM users u
+       JOIN profiles p ON p.user_id = u.id
+       WHERE u.id != $1
+         AND (
+           LOWER(TRIM(COALESCE(p.external_role, ''))) IN ('manager', 'employee')
+           OR EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role IN ('manager', 'employee'))
+         )
+         AND LOWER(TRIM(COALESCE(p.external_role, ''))) != 'subadmin'
+         AND (p.external_sub_role IS NULL OR TRIM(COALESCE(p.external_sub_role, '')) = '')
+       ORDER BY
+         CASE WHEN COALESCE(NULLIF(LOWER(TRIM(p.external_role)), ''), (SELECT LOWER(ur.role::text) FROM user_roles ur WHERE ur.user_id = u.id AND ur.role = 'manager' LIMIT 1)) = 'manager' THEN 1 ELSE 2 END,
+         p.full_name ASC`,
+      [currentUserId]
+    );
+    res.json({ data: rows, error: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /users/assignable/project
+ * Subadmin project creation: employees + managers (with manager_id). Excludes self, subadmins.
+ */
+router.get('/assignable/project', async (req, res, next) => {
   try {
     const currentUserId = req.userId;
     if (!currentUserId) {
@@ -61,11 +105,44 @@ router.get('/assignable', async (req, res, next) => {
            OR (
              LOWER(TRIM(COALESCE(p.external_role, ''))) = 'manager'
              AND (p.external_sub_role IS NULL OR TRIM(COALESCE(p.external_sub_role, '')) = '')
+             AND p.manager_id IS NOT NULL
            )
          )
          AND LOWER(TRIM(COALESCE(p.external_role, ''))) != 'subadmin'
        ORDER BY CASE WHEN LOWER(TRIM(COALESCE(p.external_role, ''))) = 'manager' THEN 0 ELSE 1 END ASC,
                 p.full_name ASC`,
+      [currentUserId]
+    );
+    res.json({ data: rows, error: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /users/assignable/all
+ * Subadmin standalone task: employees + managers + other subadmins. Excludes self, admin role.
+ */
+router.get('/assignable/all', async (req, res, next) => {
+  try {
+    const currentUserId = req.userId;
+    if (!currentUserId) {
+      return res.status(401).json({ data: null, error: { message: 'Authentication required' } });
+    }
+    const { rows } = await query(
+      `SELECT p.id, p.user_id, p.full_name, p.job_title, p.avatar_url, p.employee_code, p.department,
+              COALESCE(LOWER(TRIM(p.external_role)), 'employee') AS external_role,
+              p.external_sub_role
+       FROM profiles p
+       WHERE p.user_id != $1
+         AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = p.user_id AND ur.role = 'admin')
+       ORDER BY
+         CASE
+           WHEN LOWER(TRIM(COALESCE(p.external_role, ''))) = 'subadmin' OR (p.external_sub_role IS NOT NULL AND TRIM(COALESCE(p.external_sub_role, '')) != '') THEN 1
+           WHEN LOWER(TRIM(COALESCE(p.external_role, ''))) = 'manager' THEN 2
+           ELSE 3
+         END,
+         p.full_name ASC`,
       [currentUserId]
     );
     res.json({ data: rows, error: null });

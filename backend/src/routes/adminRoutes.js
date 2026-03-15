@@ -13,4 +13,7 @@ router.post('/api-fetch', adminController.apiFetch);
 router.post('/import-employees-from-api', adminController.importEmployeesFromApi);
 router.post('/reset-database', adminController.resetDatabase);
 
+router.get('/employees/:userId/projects', adminController.getEmployeeProjects);
+router.get('/employees/:userId/stats', adminController.getEmployeeStats);
+
 export default router;

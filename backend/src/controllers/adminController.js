@@ -13,13 +13,228 @@ const ALL_TABLES = [
 
 /**
  * POST /admin/action
- * Body: { action, ... }. Actions: get-all-employees, get-managers, get-employee, update-employee, assign-role, reset-password
+ * Body: { action, ... }. Actions: get-all-employees, get-managers, get-employee, update-employee, assign-role, reset-password, get-overview-stats
  */
 export async function action(req, res, next) {
   try {
     const { action } = req.body || {};
     if (!action) {
       return res.status(400).json({ error: 'Missing action' });
+    }
+
+    if (action === 'get-overview-stats') {
+      // KPI and role distribution from users.external_role + profiles.external_sub_role (no admins in Total Employees)
+      const er = (col) => `LOWER(TRIM(COALESCE(${col}, '')))`;
+      const subNull = `(p.external_sub_role IS NULL OR TRIM(COALESCE(p.external_sub_role, '')) = '')`;
+      const subSet = `(p.external_sub_role IS NOT NULL AND TRIM(COALESCE(p.external_sub_role, '')) != '')`;
+
+      const [
+        totalEmployeesRes,
+        managersRes,
+        seniorManagersRes,
+        departmentsRes,
+        roleDistRes,
+      ] = await Promise.all([
+        query(
+          `SELECT COUNT(*)::int AS c FROM users WHERE ${er('external_role')} = 'employee'`,
+          []
+        ),
+        query(
+          `SELECT COUNT(*)::int AS c FROM users u
+           INNER JOIN profiles p ON p.user_id = u.id
+           WHERE ${er('u.external_role')} = 'manager' AND ${subNull}`,
+          []
+        ),
+        query(
+          `SELECT COUNT(*)::int AS c FROM users u
+           INNER JOIN profiles p ON p.user_id = u.id
+           WHERE ${er('u.external_role')} = 'subadmin' OR ${subSet}`,
+          []
+        ),
+        query(
+          `SELECT COUNT(DISTINCT department)::int AS c FROM profiles WHERE department IS NOT NULL AND TRIM(COALESCE(department, '')) != ''`,
+          []
+        ),
+        query(
+          `SELECT
+             CASE
+               WHEN ${er('u.external_role')} = 'employee' THEN 'Employees'
+               WHEN ${er('u.external_role')} = 'manager' AND ${subNull} THEN 'Managers'
+               WHEN ${er('u.external_role')} = 'subadmin' OR ${subSet} THEN 'Senior Managers'
+               WHEN ${er('u.external_role')} = 'admin' THEN 'Admins'
+               ELSE 'Other'
+             END AS role_group,
+             COUNT(*)::int AS count
+           FROM users u
+           LEFT JOIN profiles p ON p.user_id = u.id
+           GROUP BY 1
+           ORDER BY count DESC`,
+          []
+        ),
+      ]);
+
+      const totalEmployees = totalEmployeesRes.rows[0]?.c ?? 0;
+      const managers = managersRes.rows[0]?.c ?? 0;
+      const seniorManagers = seniorManagersRes.rows[0]?.c ?? 0;
+      const departments = departmentsRes.rows[0]?.c ?? 0;
+      const roleDistribution = (roleDistRes.rows || []).map((r) => ({ role_group: r.role_group, count: r.count }));
+      const totalUsers = roleDistribution.reduce((s, r) => s + r.count, 0);
+
+      return res.json({
+        data: {
+          totalEmployees,
+          managers,
+          seniorManagers,
+          departments,
+          roleDistribution,
+          totalUsers,
+        },
+      });
+    }
+
+    if (action === 'get-assignable-managers') {
+      const { exclude_profile_id: excludeProfileId } = req.body || {};
+      const er = (col) => `LOWER(TRIM(COALESCE(${col}, '')))`;
+      const { rows } = await query(
+        `SELECT p.id, p.user_id, p.full_name, p.job_title, p.avatar_url, p.employee_code,
+                u.external_role, p.external_sub_role
+         FROM users u
+         INNER JOIN profiles p ON p.user_id = u.id
+         WHERE ${er('u.external_role')} IN ('manager', 'subadmin')
+           AND ($1::uuid IS NULL OR p.id != $1)
+         ORDER BY CASE WHEN ${er('u.external_role')} = 'subadmin' THEN 1 ELSE 2 END, p.full_name ASC`,
+        [excludeProfileId || null]
+      );
+      return res.json({ data: { managers: rows } });
+    }
+
+    if (action === 'get-employee-work-stats') {
+      const { employee_profile_id: profileId } = req.body || {};
+      if (!profileId) return res.status(400).json({ error: 'Missing employee_profile_id' });
+      const { rows: profileRows } = await query('SELECT user_id FROM profiles WHERE id = $1', [profileId]);
+      const profile = profileRows[0];
+      if (!profile) return res.status(404).json({ error: 'Employee not found' });
+      const userId = profile.user_id;
+
+      const monthStart = await query(
+        `SELECT DATE_TRUNC('month', NOW())::date AS d, (DATE_TRUNC('month', NOW()) + INTERVAL '1 month' - INTERVAL '1 day')::date AS end_d`,
+        []
+      );
+      const start = monthStart.rows[0]?.d;
+      const end = monthStart.rows[0]?.end_d;
+
+      // Working days in month (weekdays Mon–Fri)
+      const { rows: wdRows } = await query(
+        `SELECT COUNT(*)::int AS n FROM generate_series($1::date, $2::date, '1 day'::interval) d
+         WHERE EXTRACT(DOW FROM d) NOT IN (0, 6)`,
+        [start, end]
+      );
+      const workingDaysInMonth = wdRows[0]?.n ?? 0;
+
+      // Present days this month (has check-in)
+      const { rows: presentRows } = await query(
+        `SELECT COUNT(DISTINCT date)::int AS n FROM attendance
+         WHERE user_id = $1 AND date >= $2 AND date <= $3 AND check_in_time IS NOT NULL`,
+        [userId, start, end]
+      );
+      const presentDays = presentRows[0]?.n ?? 0;
+
+      // This week check-ins
+      const { rows: weekRows } = await query(
+        `SELECT date AS day, check_in_time AS check_in, check_out_time AS check_out,
+                CASE WHEN check_out_time IS NOT NULL AND check_in_time IS NOT NULL
+                  THEN EXTRACT(EPOCH FROM (check_out_time - check_in_time)) / 3600 ELSE NULL END AS total_hours
+         FROM attendance
+         WHERE user_id = $1 AND date >= DATE_TRUNC('week', NOW())::date
+         ORDER BY date ASC`,
+        [userId]
+      );
+
+      // Work hours this month (completed = has check-out)
+      const { rows: hoursRows } = await query(
+        `SELECT
+           COALESCE(SUM(EXTRACT(EPOCH FROM (check_out_time - check_in_time)) / 3600), 0) AS total_hrs,
+           COALESCE(AVG(EXTRACT(EPOCH FROM (check_out_time - check_in_time)) / 3600), 0) AS daily_avg_hrs,
+           COUNT(*)::int AS days_worked
+         FROM attendance
+         WHERE user_id = $1 AND date >= $2 AND date <= $3 AND check_out_time IS NOT NULL AND check_in_time IS NOT NULL`,
+        [userId, start, end]
+      );
+      const workHours = hoursRows[0] || { total_hrs: 0, daily_avg_hrs: 0, days_worked: 0 };
+
+      // Leave balances (current year)
+      const year = new Date().getFullYear();
+      const { rows: leaveRows } = await query(
+        `SELECT lt.name AS leave_type, lt.color,
+                lb.total AS total_days, lb.used AS used_days,
+                (lb.total - COALESCE(lb.used, 0))::numeric AS remaining_days
+         FROM leave_balances lb
+         JOIN leave_types lt ON lt.id = lb.leave_type_id
+         WHERE lb.user_id = $1 AND lb.year = $2`,
+        [userId, year]
+      );
+
+      // Task counts (assigned_to = profile id)
+      const { rows: taskRows } = await query(
+        `SELECT
+           COUNT(*) FILTER (WHERE status IN ('completed', 'approved', 'done'))::int AS completed,
+           COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
+           COUNT(*) FILTER (WHERE status = 'in_progress')::int AS in_progress,
+           COUNT(*) FILTER (WHERE status = 'in_review')::int AS in_review,
+           COUNT(*)::int AS total
+         FROM tasks
+         WHERE assigned_to = $1 AND (is_deleted = false OR is_deleted IS NULL)`,
+        [profileId]
+      );
+      const taskStats = taskRows[0] || { completed: 0, pending: 0, in_progress: 0, in_review: 0, total: 0 };
+
+      return res.json({
+        data: {
+          attendance: {
+            workingDaysInMonth,
+            presentDays,
+            ratePercent: workingDaysInMonth ? Math.round((presentDays / workingDaysInMonth) * 100) : 0,
+          },
+          weekCheckIns: weekRows.map((r) => ({
+            day: r.day,
+            check_in: r.check_in,
+            check_out: r.check_out,
+            total_hours: r.total_hours != null ? Number(r.total_hours) : null,
+          })),
+          workHours: {
+            totalHours: Number(workHours.total_hrs),
+            dailyAvgHours: Number(workHours.daily_avg_hrs),
+            daysWorked: workHours.days_worked,
+          },
+          leaveBalances: leaveRows.map((r) => ({
+            leave_type: r.leave_type,
+            color: r.color,
+            total_days: r.total_days,
+            used_days: Number(r.used_days),
+            remaining_days: Number(r.remaining_days),
+          })),
+          taskStats,
+        },
+      });
+    }
+
+    if (action === 'get-employee-projects') {
+      const { employee_profile_id: profileId } = req.body || {};
+      if (!profileId) return res.status(400).json({ error: 'Missing employee_profile_id' });
+      const { rows } = await query(
+        `SELECT p.id, p.name AS title, p.description, p.project_type, p.due_date, p.created_at, p.status,
+                COUNT(pm2.employee_id)::int AS total_members,
+                creator.full_name AS created_by_name
+         FROM project_members pm
+         JOIN projects p ON p.id = pm.project_id
+         LEFT JOIN project_members pm2 ON pm2.project_id = p.id
+         LEFT JOIN profiles creator ON creator.id = p.created_by
+         WHERE pm.employee_id = $1
+         GROUP BY p.id, p.name, p.description, p.project_type, p.due_date, p.created_at, p.status, p.created_by, creator.full_name
+         ORDER BY p.created_at DESC`,
+        [profileId]
+      );
+      return res.json({ data: { projects: rows } });
     }
 
     if (action === 'get-all-employees') {
@@ -619,6 +834,172 @@ export async function resetDatabase(req, res, next) {
     });
   } catch (err) {
     console.error('[DB RESET] Error:', err);
+    next(err);
+  }
+}
+
+/**
+ * GET /admin/employees/:userId/projects
+ * Returns projects the employee is in. :userId = users.id (NOT profile id).
+ * Resolves userId -> profile id, then queries project_members by employee_id (profile id).
+ */
+export async function getEmployeeProjects(req, res, next) {
+  try {
+    const userId = req.params.userId;
+    if (!userId) return res.status(400).json({ error: 'Missing userId' });
+    const { rows: profileRows } = await query('SELECT id FROM profiles WHERE user_id = $1 LIMIT 1', [userId]);
+    const profile = profileRows[0];
+    if (!profile) {
+      return res.json({ data: { projects: [] } });
+    }
+    const profileId = profile.id;
+    const { rows } = await query(
+      `SELECT p.id, p.name AS title, p.description, p.project_type, p.due_date, p.created_at, p.status,
+              COUNT(pm2.employee_id)::int AS total_members,
+              creator.full_name AS created_by_name,
+              creator.avatar_url AS created_by_avatar
+       FROM project_members pm
+       JOIN projects p ON p.id = pm.project_id
+       LEFT JOIN project_members pm2 ON pm2.project_id = p.id
+       LEFT JOIN profiles creator ON creator.id = p.created_by
+       WHERE pm.employee_id = $1
+       GROUP BY p.id, p.name, p.description, p.project_type, p.due_date, p.created_at, p.status, creator.full_name, creator.avatar_url
+       ORDER BY p.created_at DESC`,
+      [profileId]
+    );
+    console.log('[ProjectsEndpoint] userId:', userId);
+    console.log('[ProjectsEndpoint] found projects:', rows.length);
+    return res.json({ data: { projects: rows } });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /admin/employees/:userId/stats
+ * Work stats for admin employee detail. :userId = users.id.
+ * Attendance uses user_id; tasks use profile id (resolved from user_id).
+ */
+export async function getEmployeeStats(req, res, next) {
+  try {
+    const userId = req.params.userId;
+    if (!userId) return res.status(400).json({ error: 'Missing userId' });
+    const { rows: profileRows } = await query('SELECT id FROM profiles WHERE user_id = $1 LIMIT 1', [userId]);
+    const profileId = profileRows[0]?.id ?? null;
+    const monthStart = await query(
+      `SELECT DATE_TRUNC('month', NOW())::date AS d,
+              LEAST((CURRENT_DATE), (DATE_TRUNC('month', NOW()) + INTERVAL '1 month' - INTERVAL '1 day')::date) AS end_d`,
+      []
+    );
+    const start = monthStart.rows[0]?.d;
+    const end = monthStart.rows[0]?.end_d;
+    const now = new Date();
+    const endDate = end ? new Date(end) : now;
+    const workingDaysResult = await query(
+      `SELECT COUNT(*)::int AS n FROM generate_series($1::date, $2::date, '1 day'::interval) d
+       WHERE EXTRACT(DOW FROM d) NOT IN (0, 6)`,
+      [start, endDate]
+    );
+    const workingDays = workingDaysResult.rows[0]?.n ?? 0;
+    const presentDaysResult = await query(
+      `SELECT COUNT(DISTINCT date)::int AS n FROM attendance
+       WHERE user_id = $1 AND date >= $2 AND date <= $3 AND check_in_time IS NOT NULL`,
+      [userId, start, endDate]
+    );
+    const presentDays = presentDaysResult.rows[0]?.n ?? 0;
+    const ratePercent = workingDays ? Math.round((presentDays / workingDays) * 100) : 0;
+    const weekCheckInsResult = await query(
+      `SELECT date AS day,
+              check_in_time AS check_in,
+              check_out_time AS check_out,
+              CASE WHEN check_out_time IS NOT NULL AND check_in_time IS NOT NULL
+                THEN ROUND(EXTRACT(EPOCH FROM (check_out_time - check_in_time)) / 3600, 1) ELSE NULL END AS hours_worked
+       FROM attendance
+       WHERE user_id = $1 AND date >= DATE_TRUNC('week', NOW())::date
+       ORDER BY check_in_time ASC`,
+      [userId]
+    );
+    function formatTime(ts) {
+      if (!ts) return null;
+      const d = new Date(ts);
+      const h = d.getHours();
+      const m = d.getMinutes();
+      const am = h < 12;
+      const h12 = h % 12 || 12;
+      return `${h12}:${String(m).padStart(2, '0')} ${am ? 'AM' : 'PM'}`;
+    }
+    const thisWeek = (weekCheckInsResult.rows || []).map((r) => ({
+      day: r.day,
+      check_in_time: r.check_in ? formatTime(r.check_in) : null,
+      check_out_time: r.check_out ? formatTime(r.check_out) : null,
+      hours_worked: r.hours_worked != null ? Number(r.hours_worked) : null,
+    }));
+    const monthlyHoursResult = await query(
+      `SELECT
+         ROUND(COALESCE(SUM(EXTRACT(EPOCH FROM (check_out_time - check_in_time)) / 3600), 0), 1)::numeric AS total_hours,
+         ROUND(COALESCE(AVG(EXTRACT(EPOCH FROM (check_out_time - check_in_time)) / 3600), 0), 1)::numeric AS daily_avg,
+         COUNT(*)::int AS days_worked
+       FROM attendance
+       WHERE user_id = $1 AND date >= $2 AND date <= $3 AND check_out_time IS NOT NULL AND check_in_time IS NOT NULL`,
+      [userId, start, endDate]
+    );
+    const mh = monthlyHoursResult.rows[0] || { total_hours: 0, daily_avg: 0, days_worked: 0 };
+    let leaveBalances = [];
+    const leaveResult = await query(
+      `SELECT lt.name, lt.color, lb.total AS total_days, lb.used AS used_days,
+              (lb.total - COALESCE(lb.used, 0))::numeric AS remaining_days
+       FROM leave_balances lb
+       JOIN leave_types lt ON lt.id = lb.leave_type_id
+       WHERE lb.user_id = $1 AND lb.year = EXTRACT(YEAR FROM NOW())::int
+       ORDER BY lt.name ASC`,
+      [userId]
+    );
+    leaveBalances = (leaveResult.rows || []).map((r) => ({
+      name: r.name,
+      color: r.color,
+      total_days: r.total_days,
+      used_days: Number(r.used_days),
+      remaining_days: Number(r.remaining_days),
+    }));
+    let taskStats = { completed: 0, pending: 0, in_progress: 0, in_review: 0, total: 0 };
+    if (profileId) {
+      const taskResult = await query(
+        `SELECT
+           COUNT(*) FILTER (WHERE status IN ('completed', 'done', 'approved'))::int AS completed,
+           COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
+           COUNT(*) FILTER (WHERE status = 'in_progress')::int AS in_progress,
+           COUNT(*) FILTER (WHERE status = 'in_review')::int AS in_review,
+           COUNT(*)::int AS total
+         FROM tasks
+         WHERE assigned_to = $1 AND (is_deleted = false OR is_deleted IS NULL)`,
+        [profileId]
+      );
+      taskStats = taskResult.rows[0] || taskStats;
+    }
+    return res.json({
+      data: {
+        attendance: {
+          present_days: presentDays,
+          working_days: workingDays,
+          rate_percent: ratePercent,
+          this_week: thisWeek,
+        },
+        work_hours: {
+          total_hours: Number(mh.total_hours),
+          daily_avg: Number(mh.daily_avg),
+          days_worked: mh.days_worked,
+        },
+        leave_balances: leaveBalances,
+        tasks: {
+          completed: taskStats.completed,
+          pending: taskStats.pending,
+          in_progress: taskStats.in_progress,
+          in_review: taskStats.in_review,
+          total: taskStats.total,
+        },
+      },
+    });
+  } catch (err) {
     next(err);
   }
 }

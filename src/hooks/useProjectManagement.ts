@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { db } from "@/integrations/api/db";
+import { api } from "@/integrations/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 
 export interface ProjectWithMembers {
@@ -12,6 +13,7 @@ export interface ProjectWithMembers {
   created_at: string;
   created_by: string | null;
   members: { id: string; employee_id: string; full_name: string; email: string }[];
+  member_count?: number;
 }
 
 export interface ProjectMember {
@@ -21,7 +23,23 @@ export interface ProjectMember {
   email: string;
 }
 
-// Fetch projects created by the logged-in manager
+// Project list item from GET /api/projects (includes member_count and members_preview)
+type ProjectListRow = {
+  id: string;
+  name: string;
+  description: string | null;
+  project_type: string;
+  due_date: string | null;
+  status: string | null;
+  created_at: string;
+  created_by: string | null;
+  member_count: number;
+  manager_count: number;
+  employee_count: number;
+  members_preview: { id: string; employee_id: string; full_name: string; external_role: string }[];
+};
+
+// Fetch projects for current user (created by them OR they are a member). Uses GET /api/projects with member counts.
 export const useManagerProjects = () => {
   const { user } = useAuth();
 
@@ -29,65 +47,32 @@ export const useManagerProjects = () => {
     queryKey: ["manager-projects", user?.id],
     queryFn: async () => {
       if (!user) return [];
-
-      const { data: profile } = await db
-        .from("profiles")
-        .select("id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      const profileRow = profile as { id: string } | null;
-      if (!profileRow) return [];
-
-      // Fetch projects created by this manager
-      const { data: projects, error } = await db
-        .from("projects")
-        .select("id, name, description, project_type, due_date, status, created_at, created_by")
-        .eq("created_by", profileRow.id)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-
-      const projectList = (projects as { id: string; name: string; description: string | null; project_type: string; due_date: string | null; status: string | null; created_at: string; created_by: string | null }[]) ?? [];
-      const projectIds = projectList.map((p) => p.id);
-      if (projectIds.length === 0) return [];
-
-      const { data: members } = await db
-        .from("project_members")
-        .select("id, project_id, employee_id")
-        .in("project_id", projectIds);
-
-      const memberList = (members as { id: string; project_id: string; employee_id: string }[]) ?? [];
-      const employeeIds = [...new Set(memberList.map((m) => m.employee_id))];
-      let profileMap = new Map<string, { full_name: string; email: string }>();
-
-      if (employeeIds.length > 0) {
-        const { data: profiles } = await db
-          .from("profiles")
-          .select("id, full_name, email")
-          .in("id", employeeIds);
-
-        const profileList = (profiles as { id: string; full_name: string; email: string }[]) ?? [];
-        profileMap = new Map(profileList.map((p) => [p.id, { full_name: p.full_name, email: p.email }]));
-      }
-
-      return projectList.map((p) => ({
-        ...p,
-        members: memberList
-          .filter((m) => m.project_id === p.id)
-          .map((m) => ({
-            id: m.id,
-            employee_id: m.employee_id,
-            full_name: profileMap.get(m.employee_id)?.full_name || "Unknown",
-            email: profileMap.get(m.employee_id)?.email || "",
-          })),
+      const { data, error } = await api.get<ProjectListRow[]>("/projects");
+      if (error) throw new Error(error.message);
+      const list = data ?? [];
+      return list.map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        project_type: p.project_type,
+        due_date: p.due_date,
+        status: p.status,
+        created_at: p.created_at,
+        created_by: p.created_by,
+        members: (p.members_preview ?? []).map((m) => ({
+          id: m.id ?? m.employee_id,
+          employee_id: m.employee_id,
+          full_name: m.full_name || "Unknown",
+          email: "",
+        })),
+        member_count: p.member_count ?? 0,
       })) as ProjectWithMembers[];
     },
     enabled: !!user,
   });
 };
 
-// Fetch projects where the employee is a member
+// Fetch projects where the employee is a member (same GET /api/projects; backend returns projects where created_by = me OR pm.employee_id = me).
 export const useEmployeeProjects = () => {
   const { user } = useAuth();
 
@@ -95,87 +80,71 @@ export const useEmployeeProjects = () => {
     queryKey: ["employee-projects", user?.id],
     queryFn: async () => {
       if (!user) return [];
-
-      const { data: profile } = await db
-        .from("profiles")
-        .select("id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      const profileRow = profile as { id: string } | null;
-      if (!profileRow) return [];
-
-      const { data: memberships } = await db
-        .from("project_members")
-        .select("project_id")
-        .eq("employee_id", profileRow.id);
-
-      const membershipList = (memberships as { project_id: string }[]) ?? [];
-      if (membershipList.length === 0) return [];
-
-      const projectIds = membershipList.map((m) => m.project_id);
-
-      const { data: projects, error } = await db
-        .from("projects")
-        .select("id, name, description, project_type, due_date, status, created_at, created_by")
-        .in("id", projectIds)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-
-      const { data: allMembers } = await db
-        .from("project_members")
-        .select("id, project_id, employee_id")
-        .in("project_id", projectIds);
-
-      const allMembersList = (allMembers as { id: string; project_id: string; employee_id: string }[]) ?? [];
-      const employeeIds = [...new Set(allMembersList.map((m) => m.employee_id))];
-      let profileMap = new Map<string, { full_name: string; email: string }>();
-
-      if (employeeIds.length > 0) {
-        const { data: profiles } = await db
-          .from("profiles")
-          .select("id, full_name, email")
-          .in("id", employeeIds);
-
-        const profileList = (profiles as { id: string; full_name: string; email: string }[]) ?? [];
-        profileMap = new Map(profileList.map((p) => [p.id, { full_name: p.full_name, email: p.email }]));
-      }
-
-      const projectList = (projects as { id: string; name: string; description: string | null; project_type: string; due_date: string | null; status: string | null; created_at: string; created_by: string | null }[]) ?? [];
-      const { data: taskCounts } = await db
-        .from("tasks")
-        .select("project_id")
-        .eq("assigned_to", profileRow.id)
-        .eq("is_deleted", "false")
-        .in("project_id", projectIds);
-
-      const taskCountMap = new Map<string, number>();
-      const taskCountList = (taskCounts as { project_id?: string }[]) ?? [];
-      taskCountList.forEach((t) => {
-        if (t.project_id) {
-          taskCountMap.set(t.project_id, (taskCountMap.get(t.project_id) || 0) + 1);
-        }
-      });
-
-      return projectList.map((p) => ({
-        ...p,
-        members: allMembersList
-          .filter((m) => m.project_id === p.id)
-          .map((m) => ({
-            id: m.id,
-            employee_id: m.employee_id,
-            full_name: profileMap.get(m.employee_id)?.full_name || "Unknown",
-            email: profileMap.get(m.employee_id)?.email || "",
-          })),
-        taskCount: taskCountMap.get(p.id) || 0,
+      const { data, error } = await api.get<ProjectListRow[]>("/projects");
+      if (error) throw new Error(error.message);
+      const list = data ?? [];
+      return list.map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        project_type: p.project_type,
+        due_date: p.due_date,
+        status: p.status,
+        created_at: p.created_at,
+        created_by: p.created_by,
+        members: (p.members_preview ?? []).map((m) => ({
+          id: m.id ?? m.employee_id,
+          employee_id: m.employee_id,
+          full_name: m.full_name || "Unknown",
+          email: "",
+        })),
+        member_count: p.member_count ?? 0,
+        taskCount: 0,
       }));
     },
     enabled: !!user,
   });
 };
 
-// Fetch members of a specific project (for task assignment)
+/** Subadmin project creation: employees + managers (with manager_id). Excludes self, subadmins. */
+export const useAssignableForProject = () => {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["assignable-project", user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const { data, error } = await api.get<{ id: string; user_id: string; full_name: string; job_title: string | null; avatar_url: string | null; employee_code: string | null; department: string | null; external_role: string }[]>("/users/assignable/project");
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    },
+    enabled: !!user,
+  });
+};
+
+/** Project task assignees: only members of this project (excludes self). Use GET /projects/:projectId/members. */
+export const useProjectMembersForTask = (projectId: string | null) => {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["project-members-task", projectId, user?.id],
+    queryFn: async () => {
+      if (!projectId) return [];
+      const { data, error } = await api.get<{ id: string; user_id: string; full_name: string; job_title: string | null; avatar_url: string | null; employee_code: string | null; external_role: string }[]>(`/projects/${projectId}/members`);
+      if (error) throw new Error(error.message);
+      return (data ?? []).map((p) => ({
+        id: p.id,
+        user_id: p.user_id,
+        full_name: p.full_name,
+        email: "",
+        job_title: p.job_title,
+        avatar_url: p.avatar_url ?? undefined,
+        employee_code: p.employee_code ?? undefined,
+      }));
+    },
+    enabled: !!projectId && !!user,
+  });
+};
+
+// Fetch members of a specific project (legacy / fallback - still used where API not yet used)
 export const useProjectMembers = (projectId: string | null) => {
   return useQuery({
     queryKey: ["project-members", projectId],
@@ -211,6 +180,48 @@ export const useProjectMembers = (projectId: string | null) => {
   });
 };
 
+/** Project details: full member list with role and added date. No self-exclude. */
+export interface ProjectMemberDetail {
+  id: string;
+  user_id: string;
+  full_name: string;
+  job_title: string | null;
+  avatar_url: string | null;
+  employee_code: string | null;
+  external_role: string;
+  external_sub_role: string | null;
+  added_to_project_at: string;
+}
+export const useProjectMembersDetails = (projectId: string | null) => {
+  return useQuery({
+    queryKey: ["project-members-details", projectId],
+    queryFn: async (): Promise<ProjectMemberDetail[]> => {
+      if (!projectId) return [];
+      const { data, error } = await api.get<ProjectMemberDetail[]>(`/projects/${projectId}/members/details`);
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    },
+    enabled: !!projectId,
+  });
+};
+
+export const useRemoveProjectMember = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ projectId, profileId }: { projectId: string; profileId: string }) => {
+      const { data, error } = await api.delete<{ removed: boolean }>(`/projects/${projectId}/members/${profileId}`);
+      if (error) throw new Error(error.message);
+      return data;
+    },
+    onSuccess: (_, { projectId }) => {
+      queryClient.invalidateQueries({ queryKey: ["project-members-details", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-members", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["project-members-task", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["manager-projects"] });
+    },
+  });
+};
+
 // Create a project with members
 export const useCreateProject = () => {
   const queryClient = useQueryClient();
@@ -223,12 +234,14 @@ export const useCreateProject = () => {
       projectType,
       dueDate,
       employeeIds,
+      allowAnyAssignable,
     }: {
       name: string;
       description?: string;
       projectType: string;
       dueDate: string;
       employeeIds: string[];
+      allowAnyAssignable?: boolean;
     }) => {
       if (!user) throw new Error("Not authenticated");
 
@@ -241,48 +254,36 @@ export const useCreateProject = () => {
       const profileRow = profile as { id: string } | null;
       if (!profileRow) throw new Error("Profile not found");
 
-      const { data: directReports } = await db
-        .from("profiles")
-        .select("id")
-        .eq("manager_id", profileRow.id)
-        .in("id", employeeIds);
+      if (!allowAnyAssignable) {
+        const { data: directReports } = await db
+          .from("profiles")
+          .select("id")
+          .eq("manager_id", profileRow.id)
+          .in("id", employeeIds);
 
-      const directReportsList = (directReports as { id: string }[]) ?? [];
-      if (directReportsList.length !== employeeIds.length) {
-        throw new Error("You can only assign direct reporting employees to projects");
+        const directReportsList = (directReports as { id: string }[]) ?? [];
+        if (directReportsList.length !== employeeIds.length) {
+          throw new Error("You can only assign direct reporting employees to projects");
+        }
       }
 
-      const { data: project, error: projectError } = await db
-        .from("projects")
-        .insert({
+      const { data: project, error } = await api.post<{ id: string; name: string; description: string | null; project_type: string; due_date: string | null; status: string; created_at: string; created_by: string }>(
+        "/projects",
+        {
           name,
           description: description || null,
           project_type: projectType,
           due_date: dueDate,
-          created_by: profileRow.id,
-          status: "active",
-        })
-        .select()
-        .single();
-
-      if (projectError) throw projectError;
-
-      const projectRow = project as { id: string };
-      const memberInserts = employeeIds.map((empId) => ({
-        project_id: projectRow.id,
-        employee_id: empId,
-      }));
-
-      const { error: membersError } = await db
-        .from("project_members")
-        .insert(memberInserts);
-
-      if (membersError) throw membersError;
-
+          employeeIds,
+        }
+      );
+      if (error) throw new Error(error.message);
+      if (!project) throw new Error("Failed to create project");
       return project;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["manager-projects"] });
+      queryClient.invalidateQueries({ queryKey: ["employee-projects"] });
       queryClient.invalidateQueries({ queryKey: ["projects"] });
     },
   });

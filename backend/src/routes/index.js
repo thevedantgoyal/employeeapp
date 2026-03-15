@@ -12,10 +12,12 @@ import userRoutes from './userRoutes.js';
 import timesheetRoutes from './timesheetRoutes.js';
 import requestRoutes from './requestRoutes.js';
 import roomBookingRoutes from './roomBookingRoutes.js';
+import projectRoutes from './projectRoutes.js';
 
 const router = Router();
 
 router.use('/auth', authRoutes);
+router.use('/projects', projectRoutes);
 router.use('/room_bookings', roomBookingRoutes);
 router.use('/timesheets', timesheetRoutes);
 router.use('/users', userRoutes);

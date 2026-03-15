@@ -103,7 +103,7 @@ export const useTeamMembers = () => {
   });
 };
 
-/** Fetch users assignable to standalone tasks: employees + regular managers (no subadmin, no external_sub_role, exclude self). Used only for standalone task assignee list. */
+/** Manager standalone task: direct reports + peer managers. Excludes self, subadmins. */
 export const useAssignableUsers = () => {
   const { user } = useAuth();
   return useQuery({
@@ -111,6 +111,21 @@ export const useAssignableUsers = () => {
     queryFn: async (): Promise<AssignableUser[]> => {
       if (!user) return [];
       const { data, error } = await api.get<AssignableUser[]>("/users/assignable");
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    },
+    enabled: !!user,
+  });
+};
+
+/** Subadmin standalone task: employees + managers + other subadmins. Excludes self, admin. */
+export const useAssignableAll = () => {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["assignable-all", user?.id],
+    queryFn: async (): Promise<(AssignableUser & { external_sub_role?: string | null })[]> => {
+      if (!user) return [];
+      const { data, error } = await api.get<AssignableUser[]>("/users/assignable/all");
       if (error) throw new Error(error.message);
       return data ?? [];
     },

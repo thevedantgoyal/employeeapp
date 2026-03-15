@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
-  UserPlus,
   Users,
   Edit,
   Shield,
@@ -11,7 +10,6 @@ import {
   BarChart3,
   Search,
   Trash2,
-  UserCheck,
   Building2,
   MapPin,
   Briefcase,
@@ -23,6 +21,7 @@ import {
   Eye,
   EyeOff,
   AlertTriangle,
+  Crown,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { db } from "@/integrations/api/db";
@@ -67,6 +66,15 @@ interface Stats {
   departmentBreakdown: Record<string, number>;
 }
 
+interface OverviewStats {
+  totalEmployees: number;
+  managers: number;
+  seniorManagers: number;
+  departments: number;
+  roleDistribution: { role_group: string; count: number }[];
+  totalUsers: number;
+}
+
 const containerVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1, transition: { staggerChildren: 0.05 } },
@@ -91,11 +99,21 @@ const AdminDashboard = () => {
   const [filterDepartment, setFilterDepartment] = useState<string>("");
   
 
-  // Stats
+  // Stats (from get-all-employees — used for Employees tab list/filters)
   const [stats, setStats] = useState<Stats>({
     totalEmployees: 0,
     roleBreakdown: {},
     departmentBreakdown: {},
+  });
+
+  // Overview KPIs (from get-overview-stats — users.external_role + profiles.external_sub_role)
+  const [overviewStats, setOverviewStats] = useState<OverviewStats>({
+    totalEmployees: 0,
+    managers: 0,
+    seniorManagers: 0,
+    departments: 0,
+    roleDistribution: [],
+    totalUsers: 0,
   });
 
   const [resetModalOpen, setResetModalOpen] = useState(false);
@@ -148,14 +166,27 @@ const AdminDashboard = () => {
     }
   }, []);
 
+  const fetchOverviewStats = useCallback(async () => {
+    try {
+      const response = await db.functions.invoke("admin-manage", {
+        body: { action: "get-overview-stats" },
+      });
+      if (response.error) throw response.error;
+      const d = response.data as OverviewStats | undefined;
+      if (d) setOverviewStats(d);
+    } catch (err) {
+      console.error("Error fetching overview stats:", err);
+    }
+  }, []);
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      await Promise.all([fetchEmployees(), fetchManagers()]);
+      await Promise.all([fetchEmployees(), fetchManagers(), fetchOverviewStats()]);
       setLoading(false);
     };
     loadData();
-  }, [fetchEmployees, fetchManagers]);
+  }, [fetchEmployees, fetchManagers, fetchOverviewStats]);
 
   // API Import: fetch external URL (proxy via backend)
   const handleResetDatabase = async () => {
@@ -261,78 +292,101 @@ const AdminDashboard = () => {
         {/* Overview Tab */}
         {activeTab === "overview" && (
           <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-6">
-            {/* Stats Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <motion.div variants={itemVariants} className="bg-card rounded-2xl p-5 shadow-soft border border-border/50">
+            {/* KPI Cards — 2x2 grid */}
+            <div className="grid grid-cols-2 gap-4">
+              <motion.div variants={itemVariants} className="bg-card rounded-2xl p-5 shadow-soft border border-border/50 hover:shadow-md transition-shadow">
                 <div className="flex items-center gap-3 mb-2">
-                  <div className="p-2 bg-primary/10 rounded-xl">
-                    <Users className="w-5 h-5 text-primary" />
+                  <div className="p-2.5 bg-purple-500/10 rounded-xl">
+                    <Users className="w-5 h-5 text-purple-600" />
                   </div>
                 </div>
-                <p className="text-2xl font-bold">{stats.totalEmployees}</p>
+                <p className="text-2xl font-bold">{overviewStats.totalEmployees}</p>
                 <p className="text-sm text-muted-foreground">Total Employees</p>
               </motion.div>
 
-              <motion.div variants={itemVariants} className="bg-card rounded-2xl p-5 shadow-soft border border-border/50">
+              <motion.div variants={itemVariants} className="bg-card rounded-2xl p-5 shadow-soft border border-border/50 hover:shadow-md transition-shadow">
                 <div className="flex items-center gap-3 mb-2">
-                  <div className="p-2 bg-green-500/10 rounded-xl">
-                    <UserCheck className="w-5 h-5 text-green-500" />
+                  <div className="p-2.5 bg-blue-500/10 rounded-xl">
+                    <Briefcase className="w-5 h-5 text-blue-600" />
                   </div>
                 </div>
-                <p className="text-2xl font-bold">{stats.roleBreakdown["admin"] || 0}</p>
-                <p className="text-sm text-muted-foreground">Admins</p>
-              </motion.div>
-
-              <motion.div variants={itemVariants} className="bg-card rounded-2xl p-5 shadow-soft border border-border/50">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="p-2 bg-blue-500/10 rounded-xl">
-                    <Briefcase className="w-5 h-5 text-blue-500" />
-                  </div>
-                </div>
-                <p className="text-2xl font-bold">{stats.roleBreakdown["manager"] || 0}</p>
+                <p className="text-2xl font-bold">{overviewStats.managers}</p>
                 <p className="text-sm text-muted-foreground">Managers</p>
               </motion.div>
 
-              <motion.div variants={itemVariants} className="bg-card rounded-2xl p-5 shadow-soft border border-border/50">
+              <motion.div variants={itemVariants} className="bg-card rounded-2xl p-5 shadow-soft border border-border/50 hover:shadow-md transition-shadow">
                 <div className="flex items-center gap-3 mb-2">
-                  <div className="p-2 bg-orange-500/10 rounded-xl">
-                    <Building2 className="w-5 h-5 text-orange-500" />
+                  <div className="p-2.5 bg-amber-500/10 rounded-xl">
+                    <Crown className="w-5 h-5 text-amber-600" />
                   </div>
                 </div>
-                <p className="text-2xl font-bold">{departments.length}</p>
+                <p className="text-2xl font-bold">{overviewStats.seniorManagers}</p>
+                <p className="text-sm text-muted-foreground">Senior Managers</p>
+              </motion.div>
+
+              <motion.div variants={itemVariants} className="bg-card rounded-2xl p-5 shadow-soft border border-border/50 hover:shadow-md transition-shadow">
+                <div className="flex items-center gap-3 mb-2">
+                  <div className="p-2.5 bg-green-500/10 rounded-xl">
+                    <Building2 className="w-5 h-5 text-green-600" />
+                  </div>
+                </div>
+                <p className="text-2xl font-bold">{overviewStats.departments}</p>
                 <p className="text-sm text-muted-foreground">Departments</p>
               </motion.div>
             </div>
 
-            {/* Role Distribution */}
+            {/* Role Distribution — all groups, percentages, animated bars */}
             <motion.div variants={itemVariants} className="bg-card rounded-2xl p-6 shadow-soft border border-border/50">
               <h3 className="font-semibold mb-4">Role Distribution</h3>
               <div className="space-y-3">
-                {Object.entries(stats.roleBreakdown).map(([role, count]) => (
-                  <div key={role} className="flex items-center gap-3">
-                    <span className="text-sm font-medium capitalize w-24">{role}</span>
-                    <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary rounded-full transition-all"
-                        style={{ width: `${(count / stats.totalEmployees) * 100}%` }}
-                      />
+                {overviewStats.roleDistribution.map(({ role_group, count }, i) => {
+                  const total = overviewStats.totalUsers || 1;
+                  const pct = Math.round((count / total) * 100);
+                  const barColor =
+                    role_group === "Employees"
+                      ? "bg-purple-500"
+                      : role_group === "Managers"
+                        ? "bg-blue-500"
+                        : role_group === "Senior Managers"
+                          ? "bg-amber-500"
+                          : role_group === "Admins"
+                            ? "bg-gray-500"
+                            : "bg-muted-foreground/60";
+                  return (
+                    <div key={role_group} className="flex items-center gap-3">
+                      <span className="text-sm font-medium w-36 shrink-0">{role_group}</span>
+                      <div className="flex-1 h-3 bg-muted rounded-full overflow-hidden min-w-0">
+                        <motion.div
+                          initial={{ width: 0 }}
+                          animate={{ width: `${pct}%` }}
+                          transition={{ duration: 0.5, delay: i * 0.05 }}
+                          className={`h-full rounded-full ${barColor}`}
+                        />
+                      </div>
+                      <span className="text-sm text-muted-foreground shrink-0 tabular-nums">
+                        {count} ({pct}%)
+                      </span>
                     </div>
-                    <span className="text-sm text-muted-foreground w-12 text-right">{count}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
+              {overviewStats.totalUsers > 0 && (
+                <p className="text-sm text-muted-foreground mt-4 pt-3 border-t border-border">
+                  Total: {overviewStats.totalUsers} users
+                </p>
+              )}
             </motion.div>
 
-            {/* Quick Actions */}
+            {/* Quick Actions — no Add Employee; add View All Employees */}
             <motion.div variants={itemVariants} className="bg-card rounded-2xl p-6 shadow-soft border border-border/50">
               <h3 className="font-semibold mb-4">Quick Actions</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <button
                   onClick={() => setActiveTab("employees")}
                   className="flex flex-col items-center gap-2 p-4 bg-muted/50 rounded-xl hover:bg-muted transition-colors"
                 >
-                  <UserPlus className="w-6 h-6 text-primary" />
-                  <span className="text-sm font-medium">Add Employee</span>
+                  <Users className="w-6 h-6 text-primary" />
+                  <span className="text-sm font-medium">View All Employees</span>
                 </button>
                 <button
                   onClick={() => setActiveTab("apiImport")}
