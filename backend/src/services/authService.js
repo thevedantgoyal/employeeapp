@@ -217,11 +217,19 @@ export async function signInWithMicrosoft(idToken) {
 
 /**
  * Sign in: validate credentials, return session.
+ * Email is matched case-insensitively and trimmed.
  */
 export async function signIn(email, password) {
+  const emailTrimmed = (email && String(email).trim()) || '';
+  const passwordStr = password != null ? String(password) : '';
+  if (!emailTrimmed || !passwordStr) {
+    const err = new Error('Invalid login credentials');
+    err.statusCode = 400;
+    throw err;
+  }
   const { rows } = await query(
-    'SELECT id, email, password_hash, full_name, COALESCE(first_login, false) AS first_login FROM users WHERE email = $1',
-    [email]
+    'SELECT id, email, password_hash, full_name, COALESCE(first_login, false) AS first_login FROM users WHERE LOWER(TRIM(email)) = LOWER(TRIM($1))',
+    [emailTrimmed]
   );
   if (!rows.length) {
     const err = new Error('Invalid login credentials');
@@ -432,14 +440,13 @@ export async function createUserAsAdmin(email, password, fullName, options = {})
       `INSERT INTO user_roles (user_id, role) VALUES ($1, $2)`,
       [userId, role]
     );
-    // Optional extra fields on users (external role/sub-role, employee_code if present)
-    if (options.external_role != null || options.external_sub_role != null || options.employee_code != null) {
+    // Optional extra fields on users (external role/sub-role only; employee_code lives in profiles)
+    if (options.external_role != null || options.external_sub_role != null) {
       const updates = [];
       const values = [];
       let i = 1;
       if (options.external_role != null) { updates.push(`external_role = $${i}`); values.push(options.external_role); i++; }
       if (options.external_sub_role != null) { updates.push(`external_sub_role = $${i}`); values.push(options.external_sub_role); i++; }
-      if (options.employee_code != null) { updates.push(`employee_code = $${i}`); values.push(options.employee_code); i++; }
       if (updates.length > 0) {
         values.push(userId);
         await client.query(

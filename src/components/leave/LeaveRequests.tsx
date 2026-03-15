@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import {
-  CheckCircle, XCircle, Clock, User, Calendar, FileText,
-  ExternalLink, Loader2, AlertCircle,
+  CheckCircle, XCircle, Clock, Calendar, FileText,
+  ExternalLink, Loader2, AlertCircle, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,6 +13,8 @@ import {
   useRejectLeaveRequest,
   type LeaveRequest,
 } from "@/hooks/useLeaveRequests";
+import { useAuth } from "@/contexts/AuthContext";
+import { useUserRoles } from "@/hooks/useUserRoles";
 import { formatDistanceToNow, format, parseISO } from "date-fns";
 import { toast } from "sonner";
 
@@ -32,7 +34,19 @@ const statusConfig: Record<string, { label: string; className: string; icon: typ
   rejected: { label: "Rejected", className: "bg-destructive/10 text-destructive", icon: XCircle },
 };
 
+function getInitials(name: string): string {
+  const n = String(name ?? "").trim();
+  if (!n || n.toLowerCase() === "unknown") return "?";
+  const parts = n.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase().slice(0, 2);
+}
+
 export const LeaveRequests = () => {
+  const { user: currentUser } = useAuth();
+  const { roles } = useUserRoles();
+  const userType = (currentUser as { userType?: string } | null)?.userType;
   const { data: requests, isLoading } = useLeaveRequests();
   const approveMutation = useApproveLeaveRequest();
   const rejectMutation = useRejectLeaveRequest();
@@ -53,7 +67,7 @@ export const LeaveRequests = () => {
 
   const handleReject = async (id: string) => {
     if (!comment.trim()) {
-      setRejectError("Rejection reason is mandatory");
+      setRejectError("Please add a reason for rejection");
       return;
     }
     setRejectError("");
@@ -85,13 +99,35 @@ export const LeaveRequests = () => {
     );
   }
 
-  const isPending = approveMutation.isPending || rejectMutation.isPending;
+  const isMutationPending = approveMutation.isPending || rejectMutation.isPending;
 
   return (
     <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-4">
-      {requests.map((leave: LeaveRequest) => {
+      {requests.map((leave: LeaveRequest, index: number) => {
         const config = statusConfig[leave.status] || statusConfig.pending;
         const StatusIcon = config.icon;
+
+        const u = currentUser as { external_role?: string; role?: string } | null;
+        const canApprove = (
+          u?.external_role === "admin" ||
+          u?.external_role === "manager" ||
+          u?.external_role === "subadmin" ||
+          u?.role === "admin" ||
+          u?.role === "manager" ||
+          userType === "MANAGER" ||
+          userType === "SENIOR_MANAGER" ||
+          roles.includes("admin") ||
+          roles.includes("manager") ||
+          roles.includes("hr")
+        );
+        const isLeavePending = String(leave?.status ?? "").toLowerCase() === "pending";
+        const showActions = canApprove && isLeavePending;
+        const isExpanded = reviewingId === leave.id;
+
+        if (index === 0) {
+          console.log("[LeaveCard] request.id:", leave?.id);
+          console.log("[LeaveCard] showActions:", showActions);
+        }
 
         return (
           <motion.div
@@ -102,14 +138,29 @@ export const LeaveRequests = () => {
             {/* Header */}
             <div className="flex items-start justify-between mb-3">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <User className="w-5 h-5 text-primary" />
+                <div className="w-10 h-10 rounded-full overflow-hidden bg-primary/20 flex items-center justify-center flex-shrink-0">
+                  {leave.employee_avatar_url?.trim() ? (
+                    <img
+                      src={leave.employee_avatar_url.trim()}
+                      alt={leave.employee_name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-sm font-semibold text-primary">
+                      {getInitials(leave.employee_name)}
+                    </span>
+                  )}
                 </div>
                 <div>
-                  <p className="font-medium">{leave.employee_name}</p>
+                  <p className="font-medium">{leave.employee_name ?? "Unknown"}</p>
                   <p className="text-xs text-muted-foreground">
                     Applied {formatDistanceToNow(new Date(leave.created_at), { addSuffix: true })}
                   </p>
+                  {(leave.employee_job_title || leave.employee_code) && (
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {[leave.employee_job_title, leave.employee_code].filter(Boolean).join(" · ")}
+                    </p>
+                  )}
                 </div>
               </div>
               <span className={`flex items-center gap-1 text-xs px-2 py-1 rounded-full ${config.className}`}>
@@ -163,11 +214,26 @@ export const LeaveRequests = () => {
               </div>
             )}
 
-            {/* Action section - only for actionable pending leaves */}
-            {leave.can_action && leave.status === "pending" && (
-              <>
-                {reviewingId === leave.id ? (
-                  <div className="space-y-3 pt-3 border-t border-border">
+            {/* Action section - collapsed/expanded toggle for admin/manager when leave is pending */}
+            {showActions && (
+              <div className="mt-3 border-t border-border pt-0">
+                <button
+                  type="button"
+                  onClick={() => setReviewingId(isExpanded ? null : leave.id)}
+                  className="w-full flex items-center justify-center gap-2 py-3 text-primary font-medium text-sm hover:bg-muted/50 rounded-b-2xl transition-colors"
+                >
+                  {isExpanded ? (
+                    <>
+                      <ChevronUp className="w-4 h-4" /> Hide Actions
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-4 h-4" /> Review Leave Request
+                    </>
+                  )}
+                </button>
+                {isExpanded && (
+                  <div className="space-y-3 pt-3 pb-1">
                     <Textarea
                       value={comment}
                       onChange={(e) => {
@@ -176,52 +242,48 @@ export const LeaveRequests = () => {
                       }}
                       placeholder="Add a comment (required for rejection)"
                       rows={2}
+                      className="resize-none"
                     />
                     {rejectError && (
                       <p className="text-sm text-destructive flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" />{rejectError}
+                        <AlertCircle className="w-3 h-3 shrink-0" />{rejectError}
                       </p>
                     )}
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       <Button
-                        onClick={() => handleApprove(leave.id)}
-                        disabled={isPending}
-                        className="flex-1 bg-success hover:bg-success/90"
+                        type="button"
+                        onClick={() => leave.id && handleApprove(leave.id)}
+                        disabled={isMutationPending}
+                        className="flex-1 min-w-[100px] bg-success hover:bg-success/90 text-success-foreground"
                       >
-                        <CheckCircle className="w-4 h-4 mr-2" />Approve
+                        <CheckCircle className="w-4 h-4 mr-2" /> Approve
                       </Button>
                       <Button
-                        onClick={() => handleReject(leave.id)}
-                        disabled={isPending}
+                        type="button"
+                        onClick={() => leave.id && handleReject(leave.id)}
+                        disabled={isMutationPending}
                         variant="destructive"
-                        className="flex-1"
+                        className="flex-1 min-w-[100px]"
                       >
-                        <XCircle className="w-4 h-4 mr-2" />Reject
+                        <XCircle className="w-4 h-4 mr-2" /> Reject
                       </Button>
                       <Button
+                        type="button"
                         onClick={() => {
                           setReviewingId(null);
                           setComment("");
                           setRejectError("");
                         }}
+                        disabled={isMutationPending}
                         variant="outline"
+                        className="border-muted-foreground/30 text-muted-foreground hover:bg-muted/50"
                       >
                         Cancel
                       </Button>
                     </div>
                   </div>
-                ) : (
-                  <div className="pt-3 border-t border-border">
-                    <Button
-                      onClick={() => setReviewingId(leave.id)}
-                      className="w-full"
-                      variant="outline"
-                    >
-                      Review Leave Request
-                    </Button>
-                  </div>
                 )}
-              </>
+              </div>
             )}
           </motion.div>
         );

@@ -1,7 +1,17 @@
 import * as leaveService from '../services/leaveService.js';
 
+export async function getDashboard(req, res, next) {
+  try {
+    const data = await leaveService.getDashboard(req.userId);
+    res.json({ data, error: null });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function approveLeave(req, res, next) {
   try {
+    console.log('[Approve] userId:', req.userId, 'roles:', req.roles, 'profileId:', req.profileId);
     const { leaveId } = req.params;
     const { comment } = req.body || {};
     if (!req.profileId) {
@@ -16,6 +26,7 @@ export async function approveLeave(req, res, next) {
 
 export async function rejectLeave(req, res, next) {
   try {
+    console.log('[Reject] userId:', req.userId, 'roles:', req.roles, 'profileId:', req.profileId);
     const { leaveId } = req.params;
     const { comment } = req.body || {};
     if (!req.profileId) {

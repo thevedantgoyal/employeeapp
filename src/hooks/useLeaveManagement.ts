@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { differenceInCalendarDays, isAfter, isBefore, startOfDay, format } from "date-fns";
 import { useAuth } from "@/contexts/AuthContext";
 import { db } from "@/integrations/api/db";
+import { api } from "@/integrations/api/client";
 import { toast } from "sonner";
 
 export interface LeaveBalance {
@@ -39,21 +40,24 @@ export const useLeaveManagement = () => {
 
   const fetchBalances = useCallback(async () => {
     if (!user) return;
-    const year = new Date().getFullYear();
 
-    const { data, error } = await db
-      .from("leave_balances")
-      .select("*, leave_types!inner(code, name, color)")
-      .eq("user_id", user.id)
-      .eq("year", year);
+    const { data, error } = await api.get<{
+      leave_types: { id: string; name: string; code: string; default_days: number; color: string }[];
+      balances: { total: number; used: number; leave_types: { code: string; name: string; color: string } }[];
+      fiscal_year: string;
+    }>("/leaves/dashboard");
 
-    if (error) {
-      console.error("Error fetching leave balances:", error);
+    console.log("[LeaveManagement] API response:", data);
+    console.log("[LeaveManagement] leave_types:", data?.leave_types);
+    console.log("[LeaveManagement] balances:", data?.balances);
+
+    if (error || !data) {
+      console.error("Error fetching leave dashboard:", error);
       return;
     }
 
-    const mapped: LeaveBalance[] = (data || []).map((row: Record<string, unknown>) => {
-      const lt = row.leave_types as { name?: string; code?: string; color?: string; total?: number } | undefined;
+    const mapped: LeaveBalance[] = (data.balances || []).map((row) => {
+      const lt = row.leave_types;
       const total = Number(row.total ?? 0);
       const used = Number(row.used ?? 0);
       return {
@@ -83,24 +87,51 @@ export const useLeaveManagement = () => {
       return;
     }
 
-    const mapped: LeaveRequest[] = (data || []).map((row: Record<string, unknown>) => {
+    const rows = (data || []) as Record<string, unknown>[];
+    const approverIds = [...new Set(rows.map((r) => r.approver_id).filter(Boolean))] as string[];
+    let approverNames: Record<string, string> = {};
+    if (approverIds.length > 0) {
+      const { data: profiles } = await db
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", approverIds);
+      if (Array.isArray(profiles)) {
+        for (const p of profiles) {
+          const prof = p as { id?: string; full_name?: string };
+          if (prof.id && prof.full_name) approverNames[prof.id] = prof.full_name;
+        }
+      }
+    }
+
+    const mapped: LeaveRequest[] = rows.map((row) => {
       const lt = row.leave_types as { name?: string; code?: string } | undefined;
+      const approverId = row.approver_id as string | null | undefined;
+      const approverName =
+        row.status === "pending"
+          ? "Pending approval"
+          : approverId
+            ? approverNames[approverId] ?? "—"
+            : "—";
       return {
-      id: row.id,
-      leaveType: lt?.name ?? "",
-      leaveCode: lt?.code ?? "",
-      fromDate: row.from_date,
-      toDate: row.to_date,
-      halfDay: row.half_day,
-      reason: row.reason,
-      attachment: row.attachment_url,
-      daysCount: Number(row.days_count),
-      status: row.status as "pending" | "approved" | "rejected",
-      appliedOn: row.created_at,
-      approverName: row.approver_id ? "Reporting Manager" : "—",
-      approverComment: row.approver_comment,
-      approvalStage: row.status === "pending" ? "Pending Manager Approval" :
-        row.status === "approved" ? "Manager Approved" : "Manager Rejected",
+        id: row.id,
+        leaveType: lt?.name ?? "",
+        leaveCode: lt?.code ?? "",
+        fromDate: row.from_date,
+        toDate: row.to_date,
+        halfDay: row.half_day,
+        reason: row.reason,
+        attachment: row.attachment_url,
+        daysCount: Number(row.days_count),
+        status: row.status as "pending" | "approved" | "rejected",
+        appliedOn: row.created_at,
+        approverName,
+        approverComment: row.approver_comment,
+        approvalStage:
+          row.status === "pending"
+            ? "Pending Manager Approval"
+            : row.status === "approved"
+              ? "Manager Approved"
+              : "Manager Rejected",
       };
     });
 

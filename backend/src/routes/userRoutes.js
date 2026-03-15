@@ -40,6 +40,41 @@ router.get('/me/details', async (req, res, next) => {
 });
 
 /**
+ * GET /users/assignable
+ * Returns profiles that can be assigned tasks: employees + regular managers (no subadmin, no external_sub_role).
+ * Excludes current user. Used for standalone task assignee list.
+ * Parameter: current user id from auth. Returns: id (profile id), user_id, full_name, job_title, avatar_url, employee_code, department, external_role.
+ */
+router.get('/assignable', async (req, res, next) => {
+  try {
+    const currentUserId = req.userId;
+    if (!currentUserId) {
+      return res.status(401).json({ data: null, error: { message: 'Authentication required' } });
+    }
+    const { rows } = await query(
+      `SELECT p.id, p.user_id, p.full_name, p.job_title, p.avatar_url, p.employee_code, p.department,
+              COALESCE(LOWER(TRIM(p.external_role)), 'employee') AS external_role
+       FROM profiles p
+       WHERE p.user_id != $1
+         AND (
+           LOWER(TRIM(COALESCE(p.external_role, ''))) = 'employee'
+           OR (
+             LOWER(TRIM(COALESCE(p.external_role, ''))) = 'manager'
+             AND (p.external_sub_role IS NULL OR TRIM(COALESCE(p.external_sub_role, '')) = '')
+           )
+         )
+         AND LOWER(TRIM(COALESCE(p.external_role, ''))) != 'subadmin'
+       ORDER BY CASE WHEN LOWER(TRIM(COALESCE(p.external_role, ''))) = 'manager' THEN 0 ELSE 1 END ASC,
+                p.full_name ASC`,
+      [currentUserId]
+    );
+    res.json({ data: rows, error: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /users?search=keyword
  * Returns users (id, email, full_name) for autocomplete. Search matches full_name and email.
  * Limit 20. Parameterized query. No IDOR (returns only non-sensitive fields).

@@ -5,6 +5,7 @@ import { requireManagerOrAdmin } from '../middleware/rbac.js';
 
 const router = Router();
 
+router.get('/dashboard', authenticate, leaveController.getDashboard);
 router.post('/:leaveId/approve', authenticate, requireManagerOrAdmin, leaveController.approveLeave);
 router.post('/:leaveId/reject', authenticate, requireManagerOrAdmin, leaveController.rejectLeave);
 

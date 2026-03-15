@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { TeamManagement } from "@/components/admin/TeamManagement";
 import { EmailSettings } from "@/components/admin/EmailSettings";
+import { ApiImportSection } from "@/components/admin/ApiImportSection";
 import { ScrollablePillRow } from "@/components/ui/scrollable-pill-row";
 import { NotificationBroadcast } from "@/components/admin/NotificationBroadcast";
 import {
@@ -97,34 +98,6 @@ const AdminDashboard = () => {
     departmentBreakdown: {},
   });
 
-  // API Import (Postman-like) state
-  const [apiUrl, setApiUrl] = useState("");
-  const [apiMethod, setApiMethod] = useState<"GET" | "POST">("GET");
-  const [apiHeaders, setApiHeaders] = useState<{ key: string; value: string }[]>([{ key: "", value: "" }]);
-  const [apiFetchLoading, setApiFetchLoading] = useState(false);
-  const [apiResponse, setApiResponse] = useState<unknown>(null);
-  const [apiResponseStatus, setApiResponseStatus] = useState<number | null>(null);
-  const [dataPath, setDataPath] = useState(""); // e.g. "data" or "data.employees"
-  type ParsedEmployee = {
-    email: string;
-    full_name: string;
-    employee_code?: string;
-    job_title?: string;
-    department?: string;
-    employment_type?: string; // raw code: full_time, part_time, contract
-    reporting_manager_name?: string;
-    reporting_manager_code?: string;
-    external_role?: string;
-    external_sub_role?: string;
-    default_password?: string;
-    date_of_joining?: string | null;
-    location?: string;
-  };
-  const [parsedEmployees, setParsedEmployees] = useState<ParsedEmployee[]>([]);
-  const [revealedPasswordIndex, setRevealedPasswordIndex] = useState<number | null>(null);
-  const [importLoading, setImportLoading] = useState(false);
-  const [importFailedDetails, setImportFailedDetails] = useState<{ email: string; error: string }[]>([]);
-  const [conflictModal, setConflictModal] = useState<{ existingEmails: string[]; pendingEmployees: ParsedEmployee[] } | null>(null);
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [resetConfirmText, setResetConfirmText] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
@@ -185,148 +158,6 @@ const AdminDashboard = () => {
   }, [fetchEmployees, fetchManagers]);
 
   // API Import: fetch external URL (proxy via backend)
-  const handleApiFetch = async () => {
-    if (!apiUrl.trim()) {
-      toast.error("Enter an API URL");
-      return;
-    }
-    setApiFetchLoading(true);
-    setApiResponse(null);
-    setApiResponseStatus(null);
-    try {
-      const headers: Record<string, string> = {};
-      apiHeaders.forEach((h) => {
-        if (h.key.trim()) headers[h.key.trim()] = h.value.trim();
-      });
-      const response = await db.functions.invoke("admin-api-fetch", {
-        body: { url: apiUrl.trim(), method: apiMethod, headers },
-      });
-      if (response.error) throw response.error;
-      const body = response.data?.body;
-      const status = response.data?.status;
-      setApiResponse(body);
-      setApiResponseStatus(status ?? null);
-      if (status && status >= 400) toast.error(`API returned ${status}`);
-      else toast.success("Response received");
-    } catch (err) {
-      console.error("API fetch error:", err);
-      toast.error("Failed to fetch URL");
-      setApiResponse(null);
-    } finally {
-      setApiFetchLoading(false);
-    }
-  };
-
-  // Get value from object by path e.g. "data.employees"
-  const getByPath = (obj: unknown, path: string): unknown => {
-    if (!path.trim()) return obj;
-    const keys = path.trim().split(".").filter(Boolean);
-    let cur: unknown = obj;
-    for (const k of keys) {
-      if (cur == null || typeof cur !== "object") return undefined;
-      cur = (cur as Record<string, unknown>)[k];
-    }
-    return cur;
-  };
-
-  const formatEmploymentType = (raw: string | undefined): string => {
-    if (!raw || !String(raw).trim()) return "—";
-    const v = String(raw).trim().toLowerCase();
-    if (v === "full_time") return "Full Time";
-    if (v === "part_time") return "Part Time";
-    if (v === "contract") return "Contract";
-    return raw;
-  };
-
-  const handleParseEmployees = async () => {
-    const raw = dataPath.trim() ? getByPath(apiResponse, dataPath) : apiResponse;
-    const arr = Array.isArray(raw) ? raw : raw && typeof raw === "object" && "data" in (raw as object) ? (raw as { data: unknown[] }).data : null;
-    const list = Array.isArray(arr) ? arr : raw && typeof raw === "object" ? [raw] : [];
-    const mapped: ParsedEmployee[] = list
-      .map((item: Record<string, unknown>) => {
-        const firstName = String(item.firstName ?? item.first_name ?? "").trim();
-        const lastName = String(item.lastName ?? item.last_name ?? "").trim();
-        const full_name = `${firstName} ${lastName}`.trim() || (item.full_name ?? item.fullName ?? item.name ?? item.Email ?? item.email ?? "") as string;
-        const email = (item.email ?? item.Email ?? item.mail ?? "") as string;
-        const designation = (item.designation ?? item.job_title ?? item.jobTitle ?? item.title) as string | undefined;
-        const departmentName = (item.departmentName ?? item.department ?? item.Department ?? item.dept) as string | undefined;
-        const employmentTypeRaw = (item.employmentType ?? item.employment_type) as string | undefined;
-        const reportingManagerName = (item.reportingManagerName ?? item.reporting_manager_name ?? item.reportingManager ?? item.manager ?? item.managerName) as string | null | undefined;
-        const reportingManagerCode = (item.reportingManagerId ?? item.reporting_manager_id) as string | null | undefined;
-        const externalRole = (item.externalRole ?? item.external_role) as string | undefined;
-        const externalSubRole = (item.externalSubRole ?? item.external_sub_role) as string | undefined;
-        const defaultPassword = (item.defaultPassword ?? item.default_password) as string | undefined;
-        return {
-          email,
-          full_name: full_name || email.split("@")[0],
-          employee_code: (item.employeeCode ?? item.employee_code) as string | undefined,
-          job_title: designation?.trim() || undefined,
-          department: departmentName?.trim() || undefined,
-          employment_type: employmentTypeRaw ? String(employmentTypeRaw).trim().toLowerCase() : undefined,
-          reporting_manager_name: reportingManagerName?.trim() || undefined,
-          reporting_manager_code: reportingManagerCode?.trim() || undefined,
-          external_role: externalRole?.trim() || undefined,
-          external_sub_role: externalSubRole?.trim() || undefined,
-          default_password: defaultPassword != null ? String(defaultPassword) : undefined,
-          date_of_joining: (item.dateOfJoining ?? item.date_of_joining) as string | null | undefined,
-          location: (item.location ?? item.Location ?? item.office) as string | undefined,
-        };
-      })
-      .filter((e) => e.email);
-
-    setParsedEmployees(mapped);
-    setRevealedPasswordIndex(null);
-    if (mapped.length === 0) toast.error("No rows with email found. Check data path or response shape.");
-    else toast.success(`Parsed ${mapped.length} employee(s)`);
-  };
-
-  const handleSaveToDb = async (onConflict?: "skip" | "overwrite") => {
-    const toSave = parsedEmployees.length ? parsedEmployees : [];
-    if (!toSave.length) {
-      toast.error("No employees to save. Fetch API and parse first.");
-      return;
-    }
-    setImportLoading(true);
-    try {
-      const response = await db.functions.invoke("admin-import-employees-from-api", {
-        body: { employees: toSave, onConflict },
-      });
-      if (response.error) throw response.error;
-      const data = response.data as {
-        conflict?: boolean;
-        existingEmails?: string[];
-        existingCount?: number;
-        created?: string[];
-        updated?: number;
-        skipped?: number;
-        failed?: { email: string; error: string }[];
-        failedDetails?: { email: string; error: string }[];
-        message?: string;
-      };
-      if (data.conflict && data.existingEmails?.length) {
-        setConflictModal({ existingEmails: data.existingEmails, pendingEmployees: toSave });
-        setImportFailedDetails([]);
-        setImportLoading(false);
-        return;
-      }
-      const created = data.created?.length ?? 0;
-      const updated = data.updated ?? 0;
-      const skipped = data.skipped ?? 0;
-      const failedList = data.failedDetails ?? data.failed ?? [];
-      const failed = failedList.length;
-      setImportFailedDetails(failedList);
-      toast.success(data.message || `Done. Created: ${created}, Updated: ${updated}, Skipped: ${skipped}, Failed: ${failed}`);
-      if (created > 0 || updated > 0) fetchEmployees();
-      setConflictModal(null);
-    } catch (err) {
-      console.error("Import error:", err);
-      toast.error("Failed to import employees");
-      setImportFailedDetails([]);
-    } finally {
-      setImportLoading(false);
-    }
-  };
-
   const handleResetDatabase = async () => {
     if (resetConfirmText !== "RESET") return;
     setResetLoading(true);
@@ -350,29 +181,6 @@ const AdminDashboard = () => {
     } finally {
       setResetLoading(false);
     }
-  };
-
-  const handleConflictResolve = (choice: "skip" | "overwrite") => {
-    if (!conflictModal) return;
-    setImportLoading(true);
-    db.functions
-      .invoke("admin-import-employees-from-api", {
-        body: { employees: conflictModal.pendingEmployees, onConflict: choice },
-      })
-      .then((response) => {
-        if (response.error) throw response.error;
-        const data = response.data as { created?: string[]; updated?: number; skipped?: number; failed?: { email: string; error: string }[]; failedDetails?: { email: string; error: string }[]; message?: string };
-        const failedList = data.failedDetails ?? data.failed ?? [];
-        setImportFailedDetails(failedList);
-        toast.success(data.message || "Import completed");
-        fetchEmployees();
-        setConflictModal(null);
-      })
-      .catch((err) => {
-        console.error("Import error:", err);
-        toast.error("Failed to import employees");
-      })
-      .finally(() => setImportLoading(false));
   };
 
   const handleUpdateEmployee = async (employeeId: string, updates: Record<string, unknown>) => {
@@ -647,202 +455,10 @@ const AdminDashboard = () => {
         {/* Teams Tab */}
         {activeTab === "teams" && <TeamManagement />}
 
-        {/* API Import Tab (Postman-like) */}
+        {/* API Import Tab */}
         {activeTab === "apiImport" && (
-          <motion.div variants={containerVariants} initial="hidden" animate="visible" className="space-y-6">
-            <motion.div variants={itemVariants} className="bg-card rounded-2xl p-6 shadow-soft border border-border/50">
-              <h3 className="font-semibold mb-4 flex items-center gap-2">
-                <Globe className="w-5 h-5 text-primary" />
-                Get Employee Data from Hrms Portal
-              </h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Enter an API URL that returns employee data (JSON). The request is sent via our server to avoid CORS. Then parse the response and save to the database.
-              </p>
-              <div className="flex flex-wrap items-center gap-2 mb-3">
-                <select
-                  value={apiMethod}
-                  onChange={(e) => setApiMethod(e.target.value as "GET" | "POST")}
-                  className="px-3 py-2 rounded-lg border border-border bg-background text-sm font-medium"
-                >
-                  <option value="GET">GET</option>
-                  <option value="POST">POST</option>
-                </select>
-                <input
-                  type="url"
-                  placeholder="https://api.example.com/employees"
-                  value={apiUrl}
-                  onChange={(e) => setApiUrl(e.target.value)}
-                  className="flex-1 min-w-[200px] px-4 py-2 rounded-xl border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <Button onClick={handleApiFetch} disabled={apiFetchLoading} className="gap-2">
-                  <Send className="w-4 h-4" />
-                  {apiFetchLoading ? "Fetching..." : "Send"}
-                </Button>
-              </div>
-              <div className="mb-4">
-                <p className="text-xs font-medium text-muted-foreground mb-2">Headers (optional)</p>
-                {apiHeaders.map((h, i) => (
-                  <div key={i} className="flex gap-2 mb-2">
-                    <input
-                      placeholder="Key"
-                      value={h.key}
-                      onChange={(e) => {
-                        const next = [...apiHeaders];
-                        next[i] = { ...next[i], key: e.target.value };
-                        setApiHeaders(next);
-                      }}
-                      className="w-32 px-3 py-1.5 rounded-lg border border-border bg-background text-sm"
-                    />
-                    <input
-                      placeholder="Value"
-                      value={h.value}
-                      onChange={(e) => {
-                        const next = [...apiHeaders];
-                        next[i] = { ...next[i], value: e.target.value };
-                        setApiHeaders(next);
-                      }}
-                      className="flex-1 px-3 py-1.5 rounded-lg border border-border bg-background text-sm"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setApiHeaders(apiHeaders.filter((_, j) => j !== i))}
-                      disabled={apiHeaders.length <= 1}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setApiHeaders([...apiHeaders, { key: "", value: "" }])}
-                  className="gap-1 mt-1"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add header
-                </Button>
-              </div>
-              {apiResponse !== null && (
-                <div className="mt-4">
-                  <p className="text-xs font-medium text-muted-foreground mb-1">
-                    Response {apiResponseStatus != null && `(${apiResponseStatus})`}
-                  </p>
-                  <pre className="p-4 rounded-xl bg-muted/50 border border-border text-xs overflow-auto max-h-[240px]">
-                    {typeof apiResponse === "string"
-                      ? apiResponse
-                      : JSON.stringify(apiResponse, null, 2)}
-                  </pre>
-                  <div className="flex flex-wrap items-center gap-2 mt-3">
-                    <input
-                      type="text"
-                      placeholder="Data path (e.g. data or data.employees)"
-                      value={dataPath}
-                      onChange={(e) => setDataPath(e.target.value)}
-                      className="flex-1 min-w-[180px] px-3 py-2 rounded-lg border border-border bg-background text-sm"
-                    />
-                    <Button variant="secondary" onClick={handleParseEmployees} className="gap-1">
-                      Parse as employees
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </motion.div>
-
-            {parsedEmployees.length > 0 && (
-              <motion.div variants={itemVariants} className="bg-card rounded-2xl p-6 shadow-soft border border-border/50">
-                <h3 className="font-semibold mb-4">Parsed employees ({parsedEmployees.length})</h3>
-                <div className="overflow-x-auto overflow-y-auto max-h-[320px] border border-border rounded-xl">
-                  <table className="w-full text-sm min-w-[1100px]">
-                    <thead className="bg-muted/50 sticky top-0">
-                      <tr>
-                        <th className="text-left p-2 font-medium whitespace-nowrap">Full Name</th>
-                        <th className="text-left p-2 font-medium whitespace-nowrap">Email</th>
-                        <th className="text-left p-2 font-medium whitespace-nowrap">Employee Code</th>
-                        <th className="text-left p-2 font-medium whitespace-nowrap">Job Title</th>
-                        <th className="text-left p-2 font-medium whitespace-nowrap">Department</th>
-                        <th className="text-left p-2 font-medium whitespace-nowrap">Employment Type</th>
-                        <th className="text-left p-2 font-medium whitespace-nowrap">Reporting Manager</th>
-                        <th className="text-left p-2 font-medium whitespace-nowrap">Reporting Manager Code</th>
-                        <th className="text-left p-2 font-medium whitespace-nowrap">Role</th>
-                        <th className="text-left p-2 font-medium whitespace-nowrap">Sub Role</th>
-                        <th className="text-left p-2 font-medium whitespace-nowrap">Default Password</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {parsedEmployees.map((emp, i) => (
-                        <tr key={i} className="border-t border-border">
-                          <td className="p-2 whitespace-nowrap">{emp.full_name}</td>
-                          <td className="p-2 whitespace-nowrap">{emp.email}</td>
-                          <td className="p-2 whitespace-nowrap">{emp.employee_code ?? "—"}</td>
-                          <td className="p-2 whitespace-nowrap">{emp.job_title ?? "—"}</td>
-                          <td className="p-2 whitespace-nowrap">{emp.department ?? "—"}</td>
-                          <td className="p-2 whitespace-nowrap">
-                            {emp.employment_type ? formatEmploymentType(emp.employment_type) : "—"}
-                          </td>
-                          <td className="p-2 whitespace-nowrap">{emp.reporting_manager_name ?? "—"}</td>
-                          <td className="p-2 whitespace-nowrap">{emp.reporting_manager_code ?? "—"}</td>
-                          <td className="p-2 whitespace-nowrap">
-                            {emp.external_role ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-xs">
-                                {emp.external_role}
-                              </span>
-                            ) : (
-                              "—"
-                            )}
-                          </td>
-                          <td className="p-2 whitespace-nowrap">{emp.external_sub_role ?? "—"}</td>
-                          <td className="p-2 whitespace-nowrap">
-                            {emp.default_password != null && emp.default_password !== "" ? (
-                              <span className="inline-flex items-center gap-1">
-                                <span className="font-mono">
-                                  {revealedPasswordIndex === i ? emp.default_password : "••••••••"}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => setRevealedPasswordIndex((prev) => (prev === i ? null : i))}
-                                  className="p-0.5 rounded hover:bg-muted text-muted-foreground"
-                                  title={revealedPasswordIndex === i ? "Hide" : "Show"}
-                                  aria-label={revealedPasswordIndex === i ? "Hide password" : "Show password"}
-                                >
-                                  {revealedPasswordIndex === i ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                </button>
-                              </span>
-                            ) : (
-                              "—"
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <Button
-                  onClick={() => handleSaveToDb()}
-                  disabled={importLoading}
-                  className="mt-4"
-                >
-                  {importLoading ? "Saving..." : "Save to database"}
-                </Button>
-                <p className="text-xs text-muted-foreground mt-2">
-                  If any of these emails already exist, you will be asked to skip or overwrite.
-                </p>
-                {importFailedDetails.length > 0 && (
-                  <div className="mt-3 p-3 rounded-lg border border-destructive/50 bg-destructive/5">
-                    <p className="text-sm font-medium text-destructive mb-2">Failed to save ({importFailedDetails.length})</p>
-                    <ul className="text-xs space-y-1 max-h-32 overflow-y-auto">
-                      {importFailedDetails.map((f, i) => (
-                        <li key={i}>
-                          <span className="font-medium">{f.email}</span>: {f.error}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </motion.div>
-            )}
+          <motion.div variants={containerVariants} initial="hidden" animate="visible">
+            <ApiImportSection onFetchSuccess={fetchEmployees} />
           </motion.div>
         )}
 
@@ -1092,37 +708,6 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {/* Conflict resolution: existing employees when importing from API */}
-        <Dialog open={!!conflictModal} onOpenChange={(open) => !open && setConflictModal(null)}>
-          <DialogContent className="max-w-md">
-            <DialogHeader>
-              <DialogTitle>Conflict: employees already exist</DialogTitle>
-            </DialogHeader>
-            <p className="text-sm text-muted-foreground">
-              {conflictModal?.existingEmails?.length} employee(s) in your import already exist in the database:
-            </p>
-            <ul className="text-sm list-disc list-inside max-h-32 overflow-y-auto bg-muted/50 rounded-lg p-3">
-              {conflictModal?.existingEmails?.slice(0, 20).map((email) => (
-                <li key={email}>{email}</li>
-              ))}
-              {(conflictModal?.existingEmails?.length ?? 0) > 20 && (
-                <li className="text-muted-foreground">… and {(conflictModal?.existingEmails?.length ?? 0) - 20} more</li>
-              )}
-            </ul>
-            <p className="text-sm">How do you want to handle them?</p>
-            <DialogFooter className="gap-2 sm:gap-0">
-              <Button variant="outline" onClick={() => setConflictModal(null)} disabled={importLoading}>
-                Cancel
-              </Button>
-              <Button variant="secondary" onClick={() => handleConflictResolve("skip")} disabled={importLoading}>
-                Skip existing
-              </Button>
-              <Button onClick={() => handleConflictResolve("overwrite")} disabled={importLoading}>
-                Overwrite profile data
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
 
         {/* Reset Database Confirmation Modal */}
         <Dialog open={resetModalOpen} onOpenChange={(open) => !open && !resetLoading && setResetModalOpen(false)}>

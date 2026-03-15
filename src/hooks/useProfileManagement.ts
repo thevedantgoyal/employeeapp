@@ -24,6 +24,8 @@ export interface ExtendedProfile {
   working_status: string;
   profile_completed: boolean;
   manager_id: string | null;
+  external_role?: string | null;
+  external_sub_role?: string | null;
 }
 
 export const useExtendedProfile = () => {

@@ -1,5 +1,54 @@
 import { query } from '../config/database.js';
 
+const CURRENT_YEAR = new Date().getFullYear();
+
+/**
+ * Get leave dashboard: leave_types and balances for user. Auto-provisions leave_balances if empty.
+ */
+export async function getDashboard(userId) {
+  const { rows: countRows } = await query(
+    'SELECT COUNT(*) AS count FROM leave_balances WHERE user_id = $1 AND year = $2',
+    [userId, CURRENT_YEAR]
+  );
+  const count = parseInt(countRows[0]?.count ?? '0', 10);
+  if (count === 0) {
+    await query(
+      `INSERT INTO leave_balances (user_id, leave_type_id, total, year)
+       SELECT $1, lt.id, lt.default_days, $2
+       FROM leave_types lt
+       ON CONFLICT (user_id, leave_type_id, year) DO NOTHING`,
+      [userId, CURRENT_YEAR]
+    );
+  }
+
+  const { rows: leaveTypes } = await query(
+    'SELECT id, name, code, default_days, color FROM leave_types ORDER BY name ASC'
+  );
+  const { rows: balances } = await query(
+    `SELECT lb.id, lb.user_id, lb.leave_type_id, lb.total, lb.used, lb.year,
+            lt.code, lt.name, lt.color
+     FROM leave_balances lb
+     JOIN leave_types lt ON lt.id = lb.leave_type_id
+     WHERE lb.user_id = $1 AND lb.year = $2
+     ORDER BY lt.name ASC`,
+    [userId, CURRENT_YEAR]
+  );
+
+  return {
+    leave_types: leaveTypes,
+    balances: balances.map((b) => ({
+      id: b.id,
+      user_id: b.user_id,
+      leave_type_id: b.leave_type_id,
+      total: Number(b.total),
+      used: Number(b.used),
+      year: b.year,
+      leave_types: { code: b.code, name: b.name, color: b.color },
+    })),
+    fiscal_year: `${CURRENT_YEAR}-${String(CURRENT_YEAR + 1).slice(-2)}`,
+  };
+}
+
 export async function checkLeaveOverlap(userId, fromDate, toDate, excludeId = null) {
   const { rows } = await query(
     'SELECT public.check_leave_overlap($1, $2, $3, $4) AS overlap',
@@ -33,15 +82,22 @@ export async function approveLeave(leaveId, approverUserId, approverProfileId, c
     );
     const employeeManagerId = profileRows[0]?.manager_id ?? null;
     const isAdmin = await hasRole(client, approverUserId, 'admin');
+    const { rows: approverProfileRows } = await client.query(
+      'SELECT external_role FROM profiles WHERE id = $1',
+      [approverProfileId]
+    );
+    const approverExternalRole = (approverProfileRows[0]?.external_role || '').toString().trim().toLowerCase();
+    const isAdminOrSubadmin = isAdmin || approverExternalRole === 'admin' || approverExternalRole === 'subadmin';
+    const isReportingManager = employeeManagerId != null && approverProfileId === employeeManagerId;
     if (employeeManagerId != null) {
-      if (approverProfileId !== employeeManagerId) {
-        const err = new Error('Only the reporting manager can approve this leave request');
+      if (!isReportingManager && !isAdminOrSubadmin) {
+        const err = new Error('Only the reporting manager, admin, or subadmin can approve this leave request');
         err.statusCode = 403;
         throw err;
       }
     } else {
-      if (!isAdmin) {
-        const err = new Error('Only admin can approve leave for employees without a reporting manager');
+      if (!isAdminOrSubadmin) {
+        const err = new Error('Only admin or subadmin can approve leave for employees without a reporting manager');
         err.statusCode = 403;
         throw err;
       }
@@ -139,15 +195,22 @@ export async function rejectLeave(leaveId, approverUserId, approverProfileId, co
     [approverUserId, 'admin']
   );
   const isAdmin = adminRows.length > 0;
+  const { rows: approverProfileRows } = await query(
+    'SELECT external_role FROM profiles WHERE id = $1',
+    [approverProfileId]
+  );
+  const approverExternalRole = (approverProfileRows[0]?.external_role || '').toString().trim().toLowerCase();
+  const isAdminOrSubadmin = isAdmin || approverExternalRole === 'admin' || approverExternalRole === 'subadmin';
+  const isReportingManager = employeeManagerId != null && approverProfileId === employeeManagerId;
   if (employeeManagerId != null) {
-    if (approverProfileId !== employeeManagerId) {
-      const err = new Error('Only the reporting manager can reject this leave request');
+    if (!isReportingManager && !isAdminOrSubadmin) {
+      const err = new Error('Only the reporting manager, admin, or subadmin can reject this leave request');
       err.statusCode = 403;
       throw err;
     }
   } else {
-    if (!isAdmin) {
-      const err = new Error('Only admin can reject leave for employees without a reporting manager');
+    if (!isAdminOrSubadmin) {
+      const err = new Error('Only admin or subadmin can reject leave for employees without a reporting manager');
       err.statusCode = 403;
       throw err;
     }

@@ -157,11 +157,18 @@ router.get('/:table', async (req, res, next) => {
     );
 
     if (table === 'tasks') {
-      console.log('[AdminTasks] Raw result count:', result.data ? result.data.length : 0);
-      console.log('[GET /data/tasks] Result:', {
-        rowCount: result.data ? result.data.length : 0,
-        error: result.error,
-      });
+      const { rows: recentRows } = await query(
+        'SELECT id, title, status, assigned_by, assigned_to, project_id, created_at FROM tasks ORDER BY created_at DESC LIMIT 10'
+      );
+      console.log('[Tasks] all recent tasks (DB):', recentRows);
+      console.log('[Tasks] currentManagerProfileId:', normalizeUUID(req.profileId));
+      console.log('[Tasks] query result count:', result.data ? result.data.length : 0);
+      if (result.data && result.data.length > 0) {
+        console.log('[Tasks] first returned task:', { id: result.data[0].id, title: result.data[0].title, assigned_by: result.data[0].assigned_by, assigned_to: result.data[0].assigned_to });
+      }
+    }
+    if (table === 'profiles' && result.data) {
+      console.log('[DirectReports] query result count:', result.data.length);
     }
 
     if (result.error) return res.status(400).json(result);
@@ -299,6 +306,7 @@ router.post('/:table', async (req, res, next) => {
           creatorProfileId = pr[0]?.id ? normalizeUUID(pr[0].id) : null;
         }
         if (creatorProfileId) row.assigned_by = creatorProfileId;
+        console.log('[CreateTask] assigned_by (creator profile id):', row.assigned_by, 'assigned_to:', row.assigned_to);
       }
 
       const assigneeIds = Array.isArray(row.assigned_to)
@@ -307,7 +315,8 @@ router.post('/:table', async (req, res, next) => {
           ? [normalizeUUID(row.assigned_to)]
           : [];
 
-      if (assigneeIds.length > 0) {
+      const isStandalone = row.task_type === 'separate_task' || row.project_id == null;
+      if (assigneeIds.length > 0 && !isStandalone) {
         if (req.userType !== 'SENIOR_MANAGER') {
           for (const assigneeProfileId of assigneeIds) {
             const { rows: assigneeRows } = await query('SELECT user_id FROM profiles WHERE id = $1', [assigneeProfileId]);
@@ -319,7 +328,11 @@ router.post('/:table', async (req, res, next) => {
         }
       }
 
-      if (assigneeIds.length > 1) {
+      const assignMode = row.assignMode === 'shared' ? 'shared' : 'individual';
+      delete row.assignMode;
+      const isSharedMulti = assigneeIds.length > 1 && assignMode === 'shared';
+
+      if (assigneeIds.length > 1 && !isSharedMulti) {
         const now = new Date().toISOString();
         const baseRow = { ...row, assigned_at: now };
         delete baseRow.assigned_to;
@@ -347,6 +360,10 @@ router.post('/:table', async (req, res, next) => {
         }
       }
 
+      if (isSharedMulti) {
+        row.assigned_to = assigneeIds[0];
+        row.assigned_at = row.assigned_at || new Date().toISOString();
+      }
       if (assigneeIds.length === 1) {
         row.assigned_to = assigneeIds[0];
         row.assigned_at = row.assigned_at || new Date().toISOString();

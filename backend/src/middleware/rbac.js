@@ -10,7 +10,8 @@ function hasRole(roles, requiredRole) {
 
 function hasAnyRole(roles, allowedRoles) {
   if (!roles || !Array.isArray(roles)) return false;
-  return allowedRoles.some((r) => roles.includes(r));
+  const normalized = roles.map((r) => String(r || '').trim().toLowerCase()).filter(Boolean);
+  return allowedRoles.some((r) => normalized.includes(String(r || '').trim().toLowerCase()));
 }
 
 /**
@@ -35,9 +36,9 @@ export function requireRoles(...allowedRoles) {
 export const requireAdmin = requireRoles('admin');
 
 /**
- * Require admin or manager or team_lead (for team/task/project management).
+ * Require admin or manager or team_lead or subadmin (for leave approve/reject, team/task/project management).
  */
-export const requireManagerOrAdmin = requireRoles('admin', 'manager', 'team_lead');
+export const requireManagerOrAdmin = requireRoles('admin', 'manager', 'team_lead', 'subadmin');
 
 /**
  * Require admin or HR (for leave balances, reports).

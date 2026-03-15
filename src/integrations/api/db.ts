@@ -32,7 +32,11 @@ function createBuilder(table: string) {
   let limitNum: number | undefined;
 
   const run = async (method: "GET" | "POST" | "PATCH" | "DELETE", body?: unknown) => {
-    if (table === "profiles" && method === "GET" && "user_id" in params && Object.keys(params).length <= 2) {
+    // Only use /profiles/me when fetching current user's profile (single user_id). Batch fetch by .in("user_id", ids) must go to data API.
+    const profileGetWithUserId = table === "profiles" && method === "GET" && "user_id" in params && Object.keys(params).length <= 2;
+    const userIdParam = params.user_id;
+    const isBatchUserIds = Array.isArray(userIdParam) && userIdParam.length > 0;
+    if (profileGetWithUserId && !isBatchUserIds) {
       const { data, error } = await api.get<unknown>(PROFILES_ME);
       return { data: single || maybeSingle ? data : data != null ? [data] : [], error };
     }

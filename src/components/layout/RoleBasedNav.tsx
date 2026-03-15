@@ -36,9 +36,11 @@ export const RoleBasedNav = () => {
 
   // Filter nav items based on user roles
   const visibleItems = allNavItems.filter((item) => {
+    // Team / Manager: show only for MANAGER and SENIOR_MANAGER; hide for EMPLOYEE
+    if (item.path === "/manager") {
+      return userType === "MANAGER" || userType === "SENIOR_MANAGER";
+    }
     if (!item.roles || item.roles.length === 0) return true;
-    // SENIOR_MANAGER should see the manager/team entry even without user_roles.manager
-    if (item.path === "/manager" && (userType === "MANAGER" || userType === "SENIOR_MANAGER")) return true;
     return item.roles.some((role) => roles.includes(role as string));
   });
 

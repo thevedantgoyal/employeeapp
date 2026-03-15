@@ -24,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   useTeamMembers,
+  useAssignableUsers,
   useProjects,
   useManagedTasks,
   useCreateTask,
@@ -32,6 +33,7 @@ import {
   useUpdateTask,
   useReassignTask,
   ManagedTask,
+  type AssignableUser,
 } from "@/hooks/useTaskManagement";
 import { useInsertActivityLog } from "@/hooks/useTaskActivityLogs";
 import { useTaskTagAssignmentsForTaskIds } from "@/hooks/useTaskTags";
@@ -45,6 +47,7 @@ import { ProjectDashboard } from "@/components/kanban/ProjectDashboard";
 import { AdvancedFilters, TaskFilters, defaultFilters } from "@/components/tasks/AdvancedFilters";
 import { GanttTimeline } from "@/components/tasks/GanttTimeline";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -93,8 +96,20 @@ export const TaskManagement = () => {
   const [taskType, setTaskType] = useState<"project_task" | "separate_task">("project_task");
   const [assigneeSearch, setAssigneeSearch] = useState("");
   const [assigneePopoverOpen, setAssigneePopoverOpen] = useState(false);
+  const [assignModeDialogOpen, setAssignModeDialogOpen] = useState(false);
+  const [assignMode, setAssignMode] = useState<"individual" | "shared">("individual");
+  const [pendingCreatePayload, setPendingCreatePayload] = useState<{
+    title: string;
+    description?: string;
+    assignedTo: string[];
+    projectId?: string;
+    priority: string;
+    dueDate: string;
+    taskType: "project_task" | "separate_task";
+  } | null>(null);
 
   const { data: teamMembers = [], isLoading: membersLoading } = useTeamMembers();
+  const { data: assignableUsers = [], isLoading: assignableLoading } = useAssignableUsers();
   const { data: projects = [], isLoading: projectsLoading } = useProjects();
   const { data: managerProjects = [] } = useManagerProjects();
   const { data: projectMembers = [] } = useProjectMembers(taskType === "project_task" ? projectId : null);
@@ -113,6 +128,20 @@ export const TaskManagement = () => {
 
   const assignees = useMemo(() => teamMembers.map(m => ({ id: m.id, name: m.full_name })), [teamMembers]);
 
+  // For standalone task: assignable list (employees + managers); for project task: project members or team members
+  const availableEmployees = useMemo(() => {
+    if (taskType === "project_task" && projectId) return projectMembers;
+    if (taskType === "separate_task") return assignableUsers as { id: string; full_name: string; job_title?: string | null; employee_code?: string | null; avatar_url?: string | null }[];
+    return teamMembers;
+  }, [taskType, projectId, projectMembers, assignableUsers, teamMembers]);
+
+  const assignableGrouped = useMemo(() => {
+    if (taskType !== "separate_task" || !assignableUsers.length) return { managers: [] as AssignableUser[], employees: [] as AssignableUser[] };
+    const managers = assignableUsers.filter((u) => (u.external_role || "").toLowerCase() === "manager");
+    const employees = assignableUsers.filter((u) => (u.external_role || "").toLowerCase() !== "manager");
+    return { managers, employees };
+  }, [taskType, assignableUsers]);
+
   const resetForm = () => {
     setTitle("");
     setDescription("");
@@ -125,19 +154,53 @@ export const TaskManagement = () => {
     setShowCreateForm(false);
   };
 
-  // Employees available for assignment based on task type
-  const availableEmployees = useMemo(() => {
-    if (taskType === "project_task" && projectId) {
-      return projectMembers;
-    }
-    return teamMembers;
-  }, [taskType, projectId, projectMembers, teamMembers]);
-
   const filteredEmployees = useMemo(() => {
     const q = assigneeSearch.trim().toLowerCase();
     if (!q) return availableEmployees;
     return availableEmployees.filter((m) => m.full_name.toLowerCase().includes(q));
   }, [availableEmployees, assigneeSearch]);
+
+  const filteredAssignableGrouped = useMemo(() => {
+    const q = assigneeSearch.trim().toLowerCase();
+    if (!q) return assignableGrouped;
+    return {
+      managers: assignableGrouped.managers.filter((m) => m.full_name.toLowerCase().includes(q)),
+      employees: assignableGrouped.employees.filter((m) => m.full_name.toLowerCase().includes(q)),
+    };
+  }, [assignableGrouped, assigneeSearch]);
+
+  const membersLoadingResolved = taskType === "separate_task" ? assignableLoading : membersLoading;
+
+  const runCreateTask = async (payload: {
+    title: string;
+    description?: string;
+    assignedTo: string[];
+    projectId?: string;
+    priority: string;
+    dueDate: string;
+    taskType: "project_task" | "separate_task";
+    assignMode?: "individual" | "shared";
+  }) => {
+    const result = await createTask.mutateAsync(payload);
+    const createdTasks = Array.isArray(result) ? result : result ? [result] : [];
+    for (const task of createdTasks) {
+      if (task?.id) {
+        insertLog.mutateAsync({
+          taskId: task.id,
+          actionType: "created",
+          newValue: { title: payload.title, priority: payload.priority, status: "pending", task_type: payload.taskType },
+        }).catch(console.error);
+      }
+    }
+    if (createdTasks.length > 1) {
+      toast.success(`${createdTasks.length} tasks created successfully`);
+    } else {
+      toast.success("Task created successfully");
+    }
+    resetForm();
+    setPendingCreatePayload(null);
+    setAssignModeDialogOpen(false);
+  };
 
   const handleCreateTask = async () => {
     if (!title.trim()) {
@@ -152,35 +215,30 @@ export const TaskManagement = () => {
       toast.error("Please select at least one employee");
       return;
     }
+    const payload = {
+      title: title.trim(),
+      description: description.trim() || undefined,
+      assignedTo: assignedToIds,
+      projectId: taskType === "project_task" ? (projectId || undefined) : undefined,
+      priority,
+      dueDate: dueDate || undefined,
+      taskType,
+    };
+    if (taskType === "separate_task" && assignedToIds.length > 1) {
+      setPendingCreatePayload(payload);
+      setAssignModeDialogOpen(true);
+      return;
+    }
     try {
-      const result = await createTask.mutateAsync({
-        title: title.trim(),
-        description: description.trim() || undefined,
-        assignedTo: assignedToIds,
-        projectId: taskType === "project_task" ? (projectId || undefined) : undefined,
-        priority,
-        dueDate: dueDate || undefined,
-        taskType,
-      });
-      const createdTasks = Array.isArray(result) ? result : result ? [result] : [];
-      for (const task of createdTasks) {
-        if (task?.id) {
-          insertLog.mutateAsync({
-            taskId: task.id,
-            actionType: "created",
-            newValue: { title: title.trim(), priority, status: "pending", task_type: taskType },
-          }).catch(console.error);
-        }
-      }
-      if (createdTasks.length > 1) {
-        toast.success(`${createdTasks.length} tasks created successfully`);
-      } else {
-        toast.success("Task created successfully");
-      }
-      resetForm();
-    } catch (error) {
+      await runCreateTask(payload);
+    } catch {
       toast.error("Failed to create task");
     }
+  };
+
+  const handleAssignModeConfirm = () => {
+    if (!pendingCreatePayload) return;
+    runCreateTask({ ...pendingCreatePayload, assignMode }).catch(() => toast.error("Failed to create task"));
   };
 
   const handleStatusChange = async (taskId: string, oldStatus: string | null, newStatus: string) => {
@@ -466,7 +524,7 @@ export const TaskManagement = () => {
                     ) : (
                       <>
                         <span className="text-xs text-muted-foreground font-medium">
-                          {assignedToIds.length} employee{assignedToIds.length !== 1 ? "s" : ""} selected
+                          Assign To ({assignedToIds.length} selected)
                         </span>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {assignedToIds.map((id) => {
@@ -492,7 +550,7 @@ export const TaskManagement = () => {
                     )}
                   </button>
                 </PopoverTrigger>
-                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0" align="start">
                   <div className="p-2 border-b border-border">
                     <Input
                       placeholder="Search by name..."
@@ -501,7 +559,7 @@ export const TaskManagement = () => {
                       className="h-9"
                     />
                   </div>
-                  <div className="flex gap-1 p-2 border-b border-border">
+                  <div className="flex gap-1 p-2 border-b border-border flex-wrap">
                     <button
                       type="button"
                       onClick={() => setAssignedToIds(availableEmployees.map((e) => e.id))}
@@ -509,6 +567,18 @@ export const TaskManagement = () => {
                     >
                       Select All
                     </button>
+                    {taskType === "separate_task" && assignableGrouped.employees.length > 0 && (
+                      <>
+                        <span className="text-muted-foreground">|</span>
+                        <button
+                          type="button"
+                          onClick={() => setAssignedToIds(assignableGrouped.employees.map((e) => e.id))}
+                          className="text-xs font-medium text-primary hover:underline"
+                        >
+                          Select All Employees
+                        </button>
+                      </>
+                    )}
                     <span className="text-muted-foreground">|</span>
                     <button
                       type="button"
@@ -518,26 +588,114 @@ export const TaskManagement = () => {
                       Clear All
                     </button>
                   </div>
-                  <div className="max-h-[220px] overflow-y-auto p-1">
-                    {filteredEmployees.length === 0 ? (
-                      <p className="text-sm text-muted-foreground py-4 text-center">No employees match</p>
+                  <div className="max-h-[280px] overflow-y-auto p-1">
+                    {taskType === "separate_task" ? (
+                      assignableLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                        </div>
+                      ) : (filteredAssignableGrouped.managers.length > 0 || filteredAssignableGrouped.employees.length > 0) ? (
+                        <>
+                          {filteredAssignableGrouped.managers.length > 0 && (
+                            <div className="mb-2">
+                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1.5 border-b border-border/50">Managers</p>
+                              {filteredAssignableGrouped.managers.map((member) => (
+                                <label
+                                  key={member.id}
+                                  className={cn(
+                                    "flex items-center gap-2 py-2 px-2 rounded-lg cursor-pointer",
+                                    assignedToIds.includes(member.id) ? "bg-primary/10" : "hover:bg-muted/60"
+                                  )}
+                                >
+                                  <Checkbox
+                                    checked={assignedToIds.includes(member.id)}
+                                    onCheckedChange={(checked) => {
+                                      setAssignedToIds((prev) =>
+                                        checked ? [...prev, member.id] : prev.filter((x) => x !== member.id)
+                                      );
+                                    }}
+                                  />
+                                  <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 text-xs font-medium text-primary">
+                                    {member.avatar_url ? (
+                                      <img src={member.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
+                                    ) : (
+                                      (member.full_name || "?").slice(0, 2).toUpperCase()
+                                    )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium truncate">{member.full_name}</p>
+                                    <p className="text-xs text-muted-foreground truncate">
+                                      {[member.job_title, member.employee_code].filter(Boolean).join(" · ") || "—"}
+                                    </p>
+                                  </div>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                          {filteredAssignableGrouped.employees.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1.5 border-b border-border/50">Employees</p>
+                              {filteredAssignableGrouped.employees.map((member) => (
+                                <label
+                                  key={member.id}
+                                  className={cn(
+                                    "flex items-center gap-2 py-2 px-2 rounded-lg cursor-pointer",
+                                    assignedToIds.includes(member.id) ? "bg-primary/10" : "hover:bg-muted/60"
+                                  )}
+                                >
+                                  <Checkbox
+                                    checked={assignedToIds.includes(member.id)}
+                                    onCheckedChange={(checked) => {
+                                      setAssignedToIds((prev) =>
+                                        checked ? [...prev, member.id] : prev.filter((x) => x !== member.id)
+                                      );
+                                    }}
+                                  />
+                                  <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0 text-xs font-medium text-primary">
+                                    {member.avatar_url ? (
+                                      <img src={member.avatar_url} alt="" className="w-full h-full rounded-full object-cover" />
+                                    ) : (
+                                      (member.full_name || "?").slice(0, 2).toUpperCase()
+                                    )}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-medium truncate">{member.full_name}</p>
+                                    <p className="text-xs text-muted-foreground truncate">
+                                      {[member.job_title, member.employee_code].filter(Boolean).join(" · ") || "—"}
+                                    </p>
+                                  </div>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground py-4 text-center">No one match</p>
+                      )
                     ) : (
-                      filteredEmployees.map((member) => (
-                        <label
-                          key={member.id}
-                          className="flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-muted/60 cursor-pointer"
-                        >
-                          <Checkbox
-                            checked={assignedToIds.includes(member.id)}
-                            onCheckedChange={(checked) => {
-                              setAssignedToIds((prev) =>
-                                checked ? [...prev, member.id] : prev.filter((x) => x !== member.id)
-                              );
-                            }}
-                          />
-                          <span className="text-sm">{member.full_name}</span>
-                        </label>
-                      ))
+                      filteredEmployees.length === 0 ? (
+                        <p className="text-sm text-muted-foreground py-4 text-center">No employees match</p>
+                      ) : (
+                        filteredEmployees.map((member) => (
+                          <label
+                            key={member.id}
+                            className={cn(
+                              "flex items-center gap-2 py-2 px-2 rounded-lg hover:bg-muted/60 cursor-pointer",
+                              assignedToIds.includes(member.id) && "bg-primary/10"
+                            )}
+                          >
+                            <Checkbox
+                              checked={assignedToIds.includes(member.id)}
+                              onCheckedChange={(checked) => {
+                                setAssignedToIds((prev) =>
+                                  checked ? [...prev, member.id] : prev.filter((x) => x !== member.id)
+                                );
+                              }}
+                            />
+                            <span className="text-sm">{member.full_name}</span>
+                          </label>
+                        ))
+                      )
                     )}
                   </div>
                 </PopoverContent>
@@ -588,6 +746,58 @@ export const TaskManagement = () => {
           </div>
         </motion.div>
       )}
+
+      {/* Assign mode dialog (standalone task, 2+ assignees) */}
+      <Dialog open={assignModeDialogOpen} onOpenChange={(open) => { if (!open) setPendingCreatePayload(null); setAssignModeDialogOpen(open); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>How should this task be assigned?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <label className={cn(
+              "flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors",
+              assignMode === "individual" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+            )}>
+              <input
+                type="radio"
+                name="assignMode"
+                checked={assignMode === "individual"}
+                onChange={() => setAssignMode("individual")}
+                className="mt-1"
+              />
+              <div>
+                <p className="font-medium">Individual Tasks</p>
+                <p className="text-sm text-muted-foreground">Separate task for each person</p>
+              </div>
+            </label>
+            <label className={cn(
+              "flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors",
+              assignMode === "shared" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+            )}>
+              <input
+                type="radio"
+                name="assignMode"
+                checked={assignMode === "shared"}
+                onChange={() => setAssignMode("shared")}
+                className="mt-1"
+              />
+              <div>
+                <p className="font-medium">Shared Task</p>
+                <p className="text-sm text-muted-foreground">One task, assigned to the first person; all can view</p>
+              </div>
+            </label>
+          </div>
+          <div className="flex gap-2 justify-end pt-2">
+            <Button variant="outline" onClick={() => { setAssignModeDialogOpen(false); setPendingCreatePayload(null); }}>
+              Cancel
+            </Button>
+            <Button onClick={handleAssignModeConfirm} disabled={createTask.isPending}>
+              {createTask.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              Confirm
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Reassign Modal */}
       {reassignTaskId && (

@@ -13,6 +13,18 @@ export interface TeamMember {
   job_title: string | null;
 }
 
+/** Assignable user for standalone task (employees + regular managers; excludes subadmin, external_sub_role, self) */
+export interface AssignableUser {
+  id: string;
+  user_id: string;
+  full_name: string;
+  job_title: string | null;
+  avatar_url: string | null;
+  employee_code: string | null;
+  department: string | null;
+  external_role: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -34,7 +46,7 @@ export interface ManagedTask {
   reassignment_count: number;
 }
 
-// Fetch team members that the current user manages
+// Fetch team members that the current user manages (direct reports) or all employees (admin/hr/subadmin with no manager)
 export const useTeamMembers = () => {
   const { user } = useAuth();
 
@@ -43,41 +55,64 @@ export const useTeamMembers = () => {
     queryFn: async () => {
       if (!user) return [];
 
-      // Get current user's profile
+      // Get current user's profile (id + external_role for manager/subadmin)
       const { data: managerProfile } = await db
         .from("profiles")
-        .select("id")
+        .select("id, external_role, manager_id")
         .eq("user_id", user.id)
         .maybeSingle();
 
       if (!managerProfile) return [];
 
-      // Check if user has manager/admin/hr roles
+      const profileId = (managerProfile as { id: string }).id;
+      const externalRole = (managerProfile as { external_role?: string | null }).external_role?.toString().trim().toLowerCase() || "";
+      const hasManager = !!(managerProfile as { manager_id?: string | null }).manager_id;
+
+      // Check if user has manager/admin/hr roles (from user_roles or profile.external_role)
       const { data: roles } = await db
         .from("user_roles")
         .select("role")
         .eq("user_id", user.id);
 
-      const userRoles = roles?.map((r) => r.role) || [];
-      const canViewAll = userRoles.includes("hr") || userRoles.includes("admin");
-      const isManager = userRoles.includes("manager") || userRoles.includes("team_lead");
+      const userRoles = roles?.map((r) => (r as { role: string }).role) || [];
+      const canViewAll =
+        userRoles.includes("hr") ||
+        userRoles.includes("admin") ||
+        (externalRole === "subadmin" && !hasManager);
+      const isManager =
+        userRoles.includes("manager") ||
+        userRoles.includes("team_lead") ||
+        externalRole === "manager" ||
+        externalRole === "subadmin";
 
       if (!canViewAll && !isManager) return [];
 
-      // Fetch team members
-      let query = db
-        .from("profiles")
-        .select("id, user_id, full_name, email, job_title");
+      // Fetch team members: all employees for admin/hr/senior-manager, else direct reports (profiles where manager_id = my profile id)
+      let q = db.from("profiles").select("id, user_id, full_name, email, job_title");
 
       if (!canViewAll) {
-        // Only fetch direct reports for managers
-        query = query.eq("manager_id", managerProfile.id);
+        q = q.eq("manager_id", profileId);
       }
 
-      const { data, error } = await query.order("full_name");
+      const { data, error } = await q.order("full_name");
 
       if (error) throw error;
-      return data as TeamMember[];
+      return (data ?? []) as TeamMember[];
+    },
+    enabled: !!user,
+  });
+};
+
+/** Fetch users assignable to standalone tasks: employees + regular managers (no subadmin, no external_sub_role, exclude self). Used only for standalone task assignee list. */
+export const useAssignableUsers = () => {
+  const { user } = useAuth();
+  return useQuery({
+    queryKey: ["assignable-users", user?.id],
+    queryFn: async (): Promise<AssignableUser[]> => {
+      if (!user) return [];
+      const { data, error } = await api.get<AssignableUser[]>("/users/assignable");
+      if (error) throw new Error(error.message);
+      return data ?? [];
     },
     enabled: !!user,
   });
@@ -114,24 +149,31 @@ export const useManagedTasks = () => {
     queryFn: async () => {
       if (!user) return [];
 
-      // Get manager's profile
+      // Get manager's profile (id and external_role for manager/subadmin)
       const { data: managerProfile } = await db
         .from("profiles")
-        .select("id")
+        .select("id, external_role, manager_id")
         .eq("user_id", user.id)
         .maybeSingle();
 
       if (!managerProfile) return [];
 
-      // Check roles
+      const externalRole = (managerProfile as { external_role?: string | null }).external_role?.toString().trim().toLowerCase() || "";
+      const hasManager = !!(managerProfile as { manager_id?: string | null }).manager_id;
+
+      // Check roles (user_roles + profile.external_role)
       const { data: roles } = await db
         .from("user_roles")
         .select("role")
         .eq("user_id", user.id);
 
-      const userRoles = roles?.map((r) => r.role) || [];
+      const userRoles = roles?.map((r) => (r as { role: string }).role) || [];
       const canViewAll = userRoles.includes("hr") || userRoles.includes("admin");
-      const isManager = userRoles.includes("manager") || userRoles.includes("team_lead");
+      const isManager =
+        userRoles.includes("manager") ||
+        userRoles.includes("team_lead") ||
+        externalRole === "manager" ||
+        externalRole === "subadmin";
 
       if (!canViewAll && !isManager) return [];
 
@@ -208,6 +250,7 @@ export const useCreateTask = () => {
       priority,
       dueDate,
       taskType,
+      assignMode,
     }: {
       title: string;
       description?: string;
@@ -216,6 +259,7 @@ export const useCreateTask = () => {
       priority?: string;
       dueDate?: string;
       taskType?: "project_task" | "separate_task";
+      assignMode?: "individual" | "shared";
     }) => {
       if (!user) throw new Error("Not authenticated");
 
@@ -233,7 +277,7 @@ export const useCreateTask = () => {
           : [];
 
       if (assigneeIds.length > 1) {
-        const body = {
+        const body: Record<string, unknown> = {
           title,
           description: description || null,
           assigned_to: assigneeIds,
@@ -245,6 +289,7 @@ export const useCreateTask = () => {
           due_date: dueDate || null,
           status: "pending",
         };
+        if (assignMode) body.assignMode = assignMode;
         const res = await api.post<{ id: string }[]>( "/data/tasks", body);
         if (res.error) throw new Error(res.error.message);
         if (!res.data) throw new Error("No tasks created");

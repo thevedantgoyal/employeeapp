@@ -46,7 +46,9 @@ export async function authenticate(req, res, next) {
     'SELECT role FROM user_roles WHERE user_id = $1',
     [userIdForQueries]
   );
-  const roles = roleRows.map((r) => r.role);
+  const fromUserRoles = (roleRows || []).map((r) => String(r.role || '').trim().toLowerCase()).filter(Boolean);
+  const fromProfile = profile?.external_role ? [String(profile.external_role).trim().toLowerCase()] : [];
+  const roles = [...new Set([...fromUserRoles, ...fromProfile])];
   req.user = user;
   req.profile = profile;
   req.roles = roles;
@@ -95,9 +97,11 @@ export async function optionalAuth(req, res, next) {
   );
   const profile = profileRows[0] || null;
   const { rows: roleRows } = await query('SELECT role FROM user_roles WHERE user_id = $1', [userIdForQueries]);
+  const fromUserRoles = (roleRows || []).map((r) => String(r.role || '').trim().toLowerCase()).filter(Boolean);
+  const fromProfile = profile?.external_role ? [String(profile.external_role).trim().toLowerCase()] : [];
   req.user = user;
   req.profile = profile;
-  req.roles = roleRows.map((r) => r.role);
+  req.roles = [...new Set([...fromUserRoles, ...fromProfile])];
   req.userId = userIdForQueries;
   req.profileId = profile?.profile_id ?? null;
   req.userType = getUserTypeFromProfile(profile);

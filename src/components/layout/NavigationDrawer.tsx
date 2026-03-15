@@ -115,8 +115,11 @@ export const NavigationDrawer = ({ open, onOpenChange }: NavigationDrawerProps) 
   }
 
   const isVisible = (item: NavItem) => {
+    // Team / Manager: show only for MANAGER and SENIOR_MANAGER (external_role); hide for EMPLOYEE
+    if (item.path === "/manager") {
+      return userType === "MANAGER" || userType === "SENIOR_MANAGER";
+    }
     if (!item.roles || item.roles.length === 0) return true;
-    if (item.path === "/manager" && (userType === "MANAGER" || userType === "SENIOR_MANAGER")) return true;
     return item.roles.some((role) => roles.includes(role as string));
   };
 

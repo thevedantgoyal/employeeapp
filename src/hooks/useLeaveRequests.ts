@@ -7,6 +7,9 @@ export interface LeaveRequest {
   id: string;
   employee_name: string;
   employee_email: string;
+  employee_job_title: string | null;
+  employee_code: string | null;
+  employee_avatar_url: string | null;
   leave_type: string;
   from_date: string;
   to_date: string;
@@ -72,6 +75,7 @@ export const useLeaveRequests = () => {
       const myProfileId = myProfile.id;
 
       let leaves: Record<string, unknown>[] = [];
+      let directReportUserIds: string[] = [];
 
       if (isAdmin) {
         // Admin sees ALL leaves
@@ -89,31 +93,33 @@ export const useLeaveRequests = () => {
           .eq("manager_id", myProfileId);
         if (!employees || employees.length === 0) return [];
 
-        const employeeUserIds = employees.map((e) => e.user_id);
+        directReportUserIds = employees.map((e) => String(e.user_id ?? ""));
         const { data, error } = await db
           .from("leaves")
           .select("*, leave_types!inner(name)")
-          .in("user_id", employeeUserIds)
+          .in("user_id", directReportUserIds)
           .order("created_at", { ascending: false });
         if (error) throw error;
         leaves = data || [];
       }
 
-      // Batch fetch profiles for all leave user_ids
+      // Batch fetch profiles for all leave user_ids (manager gets reportees; admin gets all)
       const userIds = [...new Set(leaves.map((l) => l.user_id))];
       let employeeProfiles: Record<string, unknown>[] = [];
       if (userIds.length > 0) {
         const { data } = await db
           .from("profiles")
-          .select("user_id, full_name, email, manager_id")
+          .select("user_id, full_name, email, manager_id, job_title, employee_code, avatar_url")
           .in("user_id", userIds);
         employeeProfiles = data || [];
+        console.log("[LeaveRequests] profile fetch user_ids:", userIds.length, "profiles received:", employeeProfiles?.length ?? 0);
       }
 
-      return leaves.map((leave: Record<string, unknown>) => {
+      const result = leaves.map((leave: Record<string, unknown>) => {
         const emp = employeeProfiles.find((e: Record<string, unknown>) => e.user_id === leave.user_id);
         const hasManager = !!emp?.manager_id;
-        const isDirectReport = emp?.manager_id === myProfileId;
+        const leaveUserId = leave.user_id != null ? String(leave.user_id) : "";
+        const isDirectReport = isManager && directReportUserIds.includes(leaveUserId);
 
         let canAction = false;
         if (leave.status === "pending") {
@@ -124,10 +130,14 @@ export const useLeaveRequests = () => {
           }
         }
 
+        const employee_name = (emp?.full_name as string) || "Unknown";
         return {
           id: leave.id,
-          employee_name: emp?.full_name || "Unknown",
-          employee_email: emp?.email || "",
+          employee_name,
+          employee_email: (emp?.email as string) || "",
+          employee_job_title: (emp?.job_title as string) ?? null,
+          employee_code: (emp?.employee_code as string) ?? null,
+          employee_avatar_url: (emp?.avatar_url as string) ?? null,
           leave_type: (leave.leave_types as { name?: string } | undefined)?.name || "Unknown",
           from_date: leave.from_date,
           to_date: leave.to_date,
@@ -143,6 +153,13 @@ export const useLeaveRequests = () => {
           has_manager: hasManager,
         };
       });
+
+      console.log("[LeaveRequests] received:", result?.length ?? 0, "items");
+      if (result.length > 0) {
+        console.log("[LeaveRequests] first item:", result[0]);
+        console.log("[LeaveRequests] employee_name:", result[0]?.employee_name);
+      }
+      return result;
     },
     enabled: !!user && !accessLoading && (isAdmin || isManager),
   });

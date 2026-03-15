@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/dialog";
 
 import { WorkingStatusSelector } from "@/components/profile/WorkingStatusSelector";
+import { ManagerCard } from "@/components/profile/ManagerCard";
 import {
   useExtendedProfile,
   useUpdateProfile,
@@ -43,6 +44,16 @@ const itemVariants = {
   hidden: { opacity: 0, y: 10 },
   visible: { opacity: 1, y: 0 },
 };
+
+/** Derive display type from profile for Team & Hierarchy / Organisation Role sections. */
+function getUserType(profile: ExtendedProfile | null | undefined): "EMPLOYEE" | "MANAGER" | "SENIOR_MANAGER" {
+  if (!profile) return "EMPLOYEE";
+  const role = profile.external_role;
+  const subRole = profile.external_sub_role;
+  if (role === "subadmin" || (role === "manager" && subRole)) return "SENIOR_MANAGER";
+  if (role === "manager") return "MANAGER";
+  return "EMPLOYEE";
+}
 
 const STATUS_INDICATORS: Record<string, { color: string; label: string }> = {
   available: { color: "bg-emerald-500", label: "Available" },
@@ -63,8 +74,9 @@ type ProfileEditData = {
 
 const ProfilePage = () => {
   const { user } = useAuth();
-  const userType = (user as { userType?: string } | null)?.userType;
   const { data: profile, isLoading } = useExtendedProfile();
+  const userType = getUserType(profile);
+  console.log("[TeamHierarchy] getUserType(profile):", userType);
   const updateProfile = useUpdateProfile();
   const { uploadAvatar, uploadResume, uploading } = useProfileFileUpload();
 
@@ -90,21 +102,40 @@ const ProfilePage = () => {
   // Manager state
   const [manager, setManager] = useState<{ full_name: string; job_title: string | null; avatar_url: string | null } | null>(null);
 
+  // Fetch reporting manager for both EMPLOYEE and MANAGER when profile.manager_id is set (from profiles table).
   useEffect(() => {
-    if (!profile?.manager_id) return;
+    const managerIdFromProfiles = profile?.manager_id ?? null;
+    console.log("[TeamHierarchy] current user external_role:", profile?.external_role);
+    console.log("[TeamHierarchy] manager_id from profile:", managerIdFromProfiles);
+    console.log("[TeamHierarchy] resolved manager:", manager);
+
+    if (!managerIdFromProfiles) {
+      setManager(null);
+      return;
+    }
+
     import("@/integrations/api/db").then(({ db }) => {
       db
         .from("profiles")
         .select("full_name, job_title, avatar_url")
-        .eq("id", profile.manager_id!)
+        .eq("id", managerIdFromProfiles)
         .single()
-        .then(({ data }) => {
+        .then(({ data, error }) => {
+          if (error) {
+            console.warn("[Profile] manager fetch error:", error);
+            setManager(null);
+            return;
+          }
           if (data && typeof data === "object" && "full_name" in data) {
-            setManager({
+            const resolved = {
               full_name: String((data as { full_name?: string }).full_name ?? ""),
               job_title: (data as { job_title?: string | null }).job_title ?? null,
               avatar_url: (data as { avatar_url?: string | null }).avatar_url ?? null,
-            });
+            };
+            console.log("[TeamHierarchy] resolved manager:", resolved);
+            setManager(resolved);
+          } else {
+            setManager(null);
           }
         });
     });
@@ -400,29 +431,38 @@ const ProfilePage = () => {
         </div>
       </motion.section>
 
-      {/* Team & Hierarchy */}
+      {/* Team & Hierarchy (EMPLOYEE / MANAGER) or Organisation Role (SENIOR_MANAGER) */}
       <motion.section variants={itemVariants}>
-        {userType !== "SENIOR_MANAGER" && (
+        {userType === "SENIOR_MANAGER" ? (
+          <>
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3 px-1">Organisation Role</h3>
+            <div className="bg-card rounded-2xl shadow-soft border border-border/50 overflow-hidden">
+              <div className="flex items-center gap-4 p-4">
+                <div className="w-12 h-12 rounded-full overflow-hidden bg-primary/20 flex items-center justify-center flex-shrink-0">
+                  <Building2 className="w-6 h-6 text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold truncate">
+                    {profile?.external_sub_role || "Senior Management"}
+                  </p>
+                  <p className="text-sm text-muted-foreground">Senior Management</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Reports to no one · Top of reporting chain
+                  </p>
+                </div>
+              </div>
+            </div>
+          </>
+        ) : (
           <>
             <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3 px-1">Team & Hierarchy</h3>
             <div className="bg-card rounded-2xl shadow-soft border border-border/50 overflow-hidden">
               {manager ? (
-                <div className="flex items-center gap-4 p-4">
-                  <div className="w-12 h-12 rounded-full overflow-hidden bg-accent">
-                    {manager.avatar_url?.trim() ? (
-                      <img src={manager.avatar_url.trim()} alt={manager.full_name} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-primary/10">
-                        <span className="text-sm font-semibold text-primary">{manager.full_name.charAt(0).toUpperCase()}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-xs text-muted-foreground">Reports to</p>
-                    <p className="font-semibold">{manager.full_name}</p>
-                    <p className="text-sm text-muted-foreground">{manager.job_title || "Manager"}</p>
-                  </div>
-                </div>
+                <ManagerCard
+                  full_name={manager.full_name}
+                  job_title={manager.job_title}
+                  avatar_url={manager.avatar_url}
+                />
               ) : (
                 <div className="p-6 text-center">
                   <Briefcase className="w-10 h-10 text-muted-foreground mx-auto mb-2" />

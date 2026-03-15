@@ -45,20 +45,47 @@ export async function buildAccessFilter(tableName, userId, profileId, roles, fil
 
   switch (tableName) {
     case 'profiles': {
+      // Lookup profiles by id first — allow any authenticated user to resolve a profile by id (e.g. reporting manager).
+      // This must run before role-based filters so employees can fetch their manager's profile.
+      const profileIds = filters.id != null ? (Array.isArray(filters.id) ? normalizeUUIDArray(filters.id) : [normalizeUUID(filters.id)].filter(Boolean)) : [];
+      if (profileIds.length > 0) {
+        return { where: 'id = ANY($1::uuid[])', params: [profileIds], paramIndex: 1 };
+      }
       // external_role-based RBAC (works alongside users.role/user_roles)
       if (userType === 'SENIOR_MANAGER') return { where: '1=1', params: [], paramIndex: 0 };
-      if (userType === 'MANAGER' && cleanProfileId) return { where: 'manager_id = $1', params: [cleanProfileId], paramIndex: 1 };
+      if (userType === 'MANAGER' && cleanProfileId) {
+        console.log('[DirectReports] currentManagerProfileId:', cleanProfileId, 'userId:', cleanUserId, 'branch: userType MANAGER');
+        return { where: 'manager_id = $1', params: [cleanProfileId], paramIndex: 1 };
+      }
       if (canViewAll) return { where: '1=1', params: [], paramIndex: 0 };
       if (isManager && filters.team_id) return { where: 'team_id = $1', params: [filters.team_id], paramIndex: 1 };
       // Manager requesting their direct reports: ?manager_id=<their profile id> → return profiles where manager_id = that
       const filterManagerId = normalizeUUID(filters.manager_id);
       if (isManager && filterManagerId && filterManagerId === cleanProfileId) {
+        console.log('[DirectReports] currentManagerProfileId:', cleanProfileId, 'userId:', cleanUserId, 'branch: isManager');
         return { where: 'manager_id = $1', params: [cleanProfileId], paramIndex: 1 };
       }
-      // Lookup profiles by id (e.g. activity log performer names): return those profiles by id so any user can resolve names
-      const profileIds = filters.id != null ? (Array.isArray(filters.id) ? normalizeUUIDArray(filters.id) : [normalizeUUID(filters.id)].filter(Boolean)) : [];
-      if (profileIds.length > 0) {
-        return { where: 'id = ANY($1::uuid[])', params: [profileIds], paramIndex: 1 };
+      // Allow direct reports when request has manager_id = current user's profile and they have at least one reportee (fixes managers with only external_role, no user_roles)
+      if (filterManagerId && cleanProfileId && filterManagerId === cleanProfileId) {
+        const { rows: hasReports } = await query('SELECT 1 FROM profiles WHERE manager_id = $1 LIMIT 1', [cleanProfileId]);
+        if (hasReports.length > 0) {
+          console.log('[DirectReports] currentManagerProfileId:', cleanProfileId, 'userId:', cleanUserId, 'branch: has direct reports');
+          return { where: 'manager_id = $1', params: [cleanProfileId], paramIndex: 1 };
+        }
+      }
+      // Batch fetch by user_id (e.g. manager fetching reportee profiles for leave requests)
+      const userIdsFilter = filters.user_id != null ? (Array.isArray(filters.user_id) ? normalizeUUIDArray(filters.user_id) : [normalizeUUID(filters.user_id)].filter(Boolean)) : [];
+      if (userIdsFilter.length > 0) {
+        if (canViewAll) {
+          return { where: 'user_id = ANY($1::uuid[])', params: [userIdsFilter], paramIndex: 1 };
+        }
+        if (isManager && cleanProfileId) {
+          const { rows: reportees } = await query('SELECT user_id FROM profiles WHERE manager_id = $1', [cleanProfileId]);
+          const allowedIds = reportees.map((r) => r.user_id).filter((uid) => userIdsFilter.includes(uid));
+          if (allowedIds.length > 0) {
+            return { where: 'user_id = ANY($1::uuid[])', params: [allowedIds], paramIndex: 1 };
+          }
+        }
       }
       return { where: 'user_id = $1', params: [cleanUserId], paramIndex: 1 };
     }
@@ -126,14 +153,16 @@ export async function buildAccessFilter(tableName, userId, profileId, roles, fil
         if (ok) return { where: 'assigned_to = $1 AND is_deleted = false', params: [assignedTo], paramIndex: 1 };
         return { where: '1=0', params: [], paramIndex: 0 };
       }
-      // Manager (or user with direct reports) listing all tasks: show tasks they manage + any unassigned task
+      // Manager (or user with direct reports) listing all tasks: show tasks assigned to their reportees OR created by them (assigned_by) OR unassigned
       if (isManagerOrHasReports && !assignedTo) {
-        console.log('[buildAccessFilter tasks] Branch: manager list (no assigned_to)');
-        if (!cleanUserId) return { where: '1=0', params: [], paramIndex: 0 };
-        const mp = '(SELECT id FROM profiles WHERE user_id = $1 LIMIT 1)';
+        if (!cleanProfileId) {
+          console.log('[buildAccessFilter tasks] Branch: manager list — no cleanProfileId, denying');
+          return { where: '1=0', params: [], paramIndex: 0 };
+        }
+        console.log('[buildAccessFilter tasks] Branch: manager list (no assigned_to)', { cleanProfileId, cleanUserId });
         return {
-          where: `(assigned_to IN (SELECT id FROM profiles WHERE manager_id = ${mp}) OR (assigned_to IS NULL AND assigned_by = ${mp}) OR (assigned_by = ${mp}) OR (assigned_to IS NULL AND assigned_by IS NULL) OR (assigned_to IS NULL)) AND is_deleted = false`,
-          params: [cleanUserId],
+          where: `(assigned_to IN (SELECT id FROM profiles WHERE manager_id = $1) OR (assigned_to IS NULL AND assigned_by = $1) OR (assigned_by = $1) OR (assigned_to IS NULL AND assigned_by IS NULL) OR (assigned_to IS NULL)) AND is_deleted = false`,
+          params: [cleanProfileId],
           paramIndex: 1,
         };
       }
