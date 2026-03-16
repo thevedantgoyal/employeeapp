@@ -7,8 +7,8 @@ import { api, authApi } from "@/integrations/api/client";
 const DATA_PREFIX = "/data";
 const PROFILES_ME = "/profiles/me";
 
-const getStoredAccessToken = () => localStorage.getItem("connectplus_access_token");
-const getStoredRefreshToken = () => localStorage.getItem("connectplus_refresh_token");
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
+const CREDENTIALS: RequestCredentials = "include";
 
 type QueryParams = Record<string, string | string[] | number | number[] | boolean | undefined>;
 
@@ -64,13 +64,13 @@ function createBuilder(table: string) {
     if (method === "PATCH") {
       const id = params.id ?? params.user_id;
       const q = id != null ? (typeof id === "string" ? { id } : { user_id: id }) : {};
-      const { data, error } = await api.patch<unknown>(`${path}?${new URLSearchParams(buildParams(q)).toString()}`, body);
+      const { data, error } = await api.patch<unknown>(`${path}?${new URLSearchParams(buildParams(q) as Record<string, string>).toString()}`, body);
       return { data, error };
     }
     if (method === "DELETE") {
       const id = params.id;
       const q = id != null ? { id: String(id) } : {};
-      const { data, error } = await api.delete<unknown>(`${path}?${new URLSearchParams(buildParams(q)).toString()}`);
+      const { data, error } = await api.delete<unknown>(`${path}?${new URLSearchParams(buildParams(q) as Record<string, string>).toString()}`);
       return { data, error };
     }
     return { data: null, error: { message: "Unknown method" } };
@@ -209,14 +209,11 @@ export const db = {
   from: (table: string) => createBuilder(table),
   auth: {
     getSession: async () => {
-      const access = getStoredAccessToken();
-      const refresh = getStoredRefreshToken();
-      if (!access) return { data: { session: null }, error: null };
       const { data, error } = await authApi.getSession();
-      if (error || !data?.user) return { data: { session: null }, error };
+      if (error || !data?.user) return { data: { session: null }, error: error ?? null };
       const session = {
-        access_token: access,
-        refresh_token: refresh ?? "",
+        access_token: "httpOnly",
+        refresh_token: "",
         user: data.user as { id: string; email: string },
         expires_in: 3600,
       };
@@ -253,31 +250,26 @@ export const db = {
         form.append("bucket", bucket);
         form.append("path", path);
         form.append("file", file);
-        const BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
-        const token = localStorage.getItem("connectplus_access_token");
-        const res = await fetch(`${BASE}/storage/upload`, {
+        const res = await fetch(`${API_BASE}/storage/upload`, {
           method: "POST",
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          credentials: CREDENTIALS,
           body: form,
         });
         const json = await res.json();
         if (!res.ok) return { data: null, error: { message: json.error?.message || "Upload failed" } };
-        const url = `${BASE.replace(/\/api$/, "")}/api/storage/${bucket}/${encodeURIComponent(path)}`;
+        // Avatar upload returns Base64 data URI in avatar_url; use it as url so img src works everywhere
+        const url = (json.data && json.data.avatar_url) ? json.data.avatar_url : `${API_BASE.replace(/\/api$/, "")}/api/storage/${bucket}/${encodeURIComponent(path)}`;
         return { data: { path, url }, error: null };
       },
       getPublicUrl: (path: string) => {
-        const BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
-        return { data: { publicUrl: `${BASE.replace(/\/api$/, "")}/api/storage/${bucket}/${encodeURIComponent(path)}` } };
+        return { data: { publicUrl: `${API_BASE.replace(/\/api$/, "")}/api/storage/${bucket}/${encodeURIComponent(path)}` } };
       },
       createSignedUrl: async (_path: string, _expiresIn: number) => {
-        const BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
-        return { data: { signedUrl: `${BASE.replace(/\/api$/, "")}/api/storage/${bucket}/${encodeURIComponent(_path)}` }, error: null };
+        return { data: { signedUrl: `${API_BASE.replace(/\/api$/, "")}/api/storage/${bucket}/${encodeURIComponent(_path)}` }, error: null };
       },
       remove: async (paths: string[]) => {
-        const token = localStorage.getItem("connectplus_access_token");
-        const BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
         for (const p of paths) {
-          await fetch(`${BASE}/storage/${bucket}/${encodeURIComponent(p)}`, { method: "DELETE", headers: token ? { Authorization: `Bearer ${token}` } : {} });
+          await fetch(`${API_BASE}/storage/${bucket}/${encodeURIComponent(p)}`, { method: "DELETE", credentials: CREDENTIALS });
         }
         return { data: null, error: null };
       },

@@ -75,7 +75,17 @@ export const config = {
   apiPrefix: process.env.API_PREFIX || '/api',
   corsOrigins: getCorsOrigins(),
   jwt: {
-    secret: process.env.JWT_SECRET || 'change-me-in-production-min-32-chars',
+    get secret() {
+      const raw = process.env.JWT_SECRET;
+      const isProduction = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+      if (isProduction) {
+        if (!raw || !String(raw).trim()) {
+          throw new Error('JWT_SECRET must be set in production. Set it in .env or environment.');
+        }
+        return raw.trim();
+      }
+      return raw?.trim() || 'change-me-in-production-min-32-chars';
+    },
     accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '7d',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
   },

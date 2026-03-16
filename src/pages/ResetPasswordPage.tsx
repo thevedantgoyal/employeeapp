@@ -15,8 +15,9 @@ const ResetPasswordPage = () => {
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("connectplus_access_token");
-    setIsReady(!!token);
+    authApi.getSession().then(({ data, error }) => {
+      setIsReady(!error && !!data?.user);
+    });
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -38,7 +39,7 @@ const ResetPasswordPage = () => {
         toast.error(error.message);
       } else {
         toast.success("Password updated successfully! Please sign in.");
-        clearAuth();
+        await clearAuth();
         navigate("/auth");
       }
     } catch {

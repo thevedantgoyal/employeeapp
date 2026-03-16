@@ -11,16 +11,20 @@ function getUserTypeFromProfile(profile) {
   return 'EMPLOYEE';
 }
 
+import { getAccessTokenFromRequest } from '../utils/authCookies.js';
+
 /**
  * Verify JWT and attach user + profile to req.
- * Expects Authorization: Bearer <access_token>
+ * Token from httpOnly cookie (connectplus_access_token) or Authorization: Bearer <access_token>
  */
 export async function authenticate(req, res, next) {
+  const fromCookie = getAccessTokenFromRequest(req);
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ data: null, error: { message: 'Missing or invalid authorization header' } });
+  const fromHeader = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const token = fromCookie || fromHeader;
+  if (!token) {
+    return res.status(401).json({ data: null, error: { message: 'Missing or invalid authorization' } });
   }
-  const token = authHeader.slice(7);
   let decoded;
   try {
     decoded = jwt.verify(token, config.jwt.secret);
@@ -33,7 +37,7 @@ export async function authenticate(req, res, next) {
     [cleanUserId]
   );
   if (!userRows.length) {
-    return res.status(401).json({ data: null, error: { message: 'User not found' } });
+    return res.status(401).json({ data: null, error: { message: 'Invalid or expired token' } });
   }
   const user = userRows[0];
   const userIdForQueries = normalizeUUID(user.id);
@@ -57,13 +61,13 @@ export async function authenticate(req, res, next) {
   req.userType = getUserTypeFromProfile(profile);
 
   if (req.originalUrl && req.originalUrl.includes('/data/tasks')) {
-    console.log('[auth] GET /data/tasks context:', {
-      userId: userIdForQueries,
-      profileId: req.profileId,
-      roles,
-      userType: req.userType,
-      hasProfile: !!profile,
-    });
+    // console.log('[auth] GET /data/tasks context:', {
+    //   userId: userIdForQueries,
+    //   profileId: req.profileId,
+    //   roles,
+    //   userType: req.userType,
+    //   hasProfile: !!profile,
+    // });
   }
   next();
 }
@@ -72,11 +76,13 @@ export async function authenticate(req, res, next) {
  * Optional auth: if token present and valid, set req.user/profile/roles; otherwise continue without.
  */
 export async function optionalAuth(req, res, next) {
+  const fromCookie = getAccessTokenFromRequest(req);
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const fromHeader = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+  const token = fromCookie || fromHeader;
+  if (!token) {
     return next();
   }
-  const token = authHeader.slice(7);
   let decoded;
   try {
     decoded = jwt.verify(token, config.jwt.secret);

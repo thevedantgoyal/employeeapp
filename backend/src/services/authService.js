@@ -222,7 +222,7 @@ export async function refreshSession(refreshToken) {
   }
   const { rows } = await query('SELECT id, email, COALESCE(first_login, false) AS first_login FROM users WHERE id = $1', [decoded.userId]);
   if (!rows.length) {
-    const err = new Error('User not found');
+    const err = new Error('Invalid or expired refresh token');
     err.statusCode = 401;
     throw err;
   }

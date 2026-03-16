@@ -200,8 +200,8 @@ const AdminDashboard = () => {
       toast.success("Database cleared. You can now import fresh data.");
       setResetModalOpen(false);
       setResetConfirmText("");
-      setTimeout(() => {
-        clearAuth();
+      setTimeout(async () => {
+        await clearAuth();
         navigate("/auth", { replace: true });
         window.location.reload();
       }, 3000);

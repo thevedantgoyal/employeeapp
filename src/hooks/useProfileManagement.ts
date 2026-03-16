@@ -155,13 +155,14 @@ export const useProfileFileUpload = () => {
       const fileName = `avatar-${Date.now()}.${fileExt}`;
       const filePath = `${user.id}/${fileName}`;
 
-      const { error: uploadError } = await db.storage
+      const { data, error: uploadError } = await db.storage
         .from("avatars")
         .upload(filePath, file);
       if (uploadError) throw uploadError;
-
-      const { data } = db.storage.from("avatars").getPublicUrl(filePath);
-      return data.publicUrl;
+      // Backend returns Base64 data URI in url for avatars; use it directly as img src
+      if (data?.url) return data.url;
+      const pub = db.storage.from("avatars").getPublicUrl(filePath);
+      return pub.data.publicUrl;
     } finally {
       setUploading(false);
     }
@@ -192,12 +193,12 @@ export const useProfileFileUpload = () => {
 };
 
 function validateImageFile(file: File) {
-  const allowed = ["image/jpeg", "image/png"];
+  const allowed = ["image/jpeg", "image/png", "image/webp", "image/gif"];
   if (!allowed.includes(file.type)) {
-    throw new Error("Only JPEG and PNG images are allowed");
+    throw new Error("Only images allowed (jpg, png, webp, gif)");
   }
-  if (file.size > 5 * 1024 * 1024) {
-    throw new Error("Image must be less than 5MB");
+  if (file.size > 2 * 1024 * 1024) {
+    throw new Error("Image must be under 2MB");
   }
 }
 

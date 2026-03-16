@@ -1,42 +1,24 @@
 /**
  * API client for ConnectPlus Node.js backend.
  * Use when VITE_USE_CUSTOM_BACKEND=true. Same response shape as Supabase: { data, error }.
+ * Auth uses httpOnly cookies; no tokens stored in localStorage (XSS-safe).
  */
 
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
-function getToken(): string | null {
-  return localStorage.getItem('connectplus_access_token');
-}
-
-function getRefreshToken(): string | null {
-  return localStorage.getItem('connectplus_refresh_token');
-}
-
-function setTokens(access: string, refresh: string) {
-  localStorage.setItem('connectplus_access_token', access);
-  localStorage.setItem('connectplus_refresh_token', refresh);
-}
-
-function clearTokens() {
-  localStorage.removeItem('connectplus_access_token');
-  localStorage.removeItem('connectplus_refresh_token');
-}
+const DEFAULT_FETCH_OPTIONS: RequestInit = { credentials: 'include' };
 
 export async function refreshSession(): Promise<{ access_token: string; refresh_token: string; user: { id: string; email: string } } | null> {
   try {
-    const refresh = getRefreshToken();
-    if (!refresh) return null;
     const res = await fetch(`${BASE}/auth/refresh`, {
+      ...DEFAULT_FETCH_OPTIONS,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refresh }),
+      body: JSON.stringify({}),
     });
     const json = await res.json().catch(() => ({}));
     if (json.error || !json.data?.session) return null;
-    const session = json.data.session;
-    setTokens(session.access_token, session.refresh_token);
-    return session;
+    return json.data.session;
   } catch {
     return null;
   }
@@ -53,20 +35,13 @@ async function request<T>(
       'Content-Type': 'application/json',
       ...((fetchOptions.headers as Record<string, string>) || {}),
     };
-    if (!skipAuth) {
-      const token = getToken();
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-    }
     const method = (fetchOptions.method || 'GET').toUpperCase();
-    const requestInit: RequestInit = { ...fetchOptions, headers };
+    const requestInit: RequestInit = { ...DEFAULT_FETCH_OPTIONS, ...fetchOptions, headers };
     if (method === 'GET') requestInit.cache = 'no-store';
     let res = await fetch(url, requestInit);
-    if (res.status === 401 && !skipAuth && getRefreshToken()) {
+    if (res.status === 401 && !skipAuth) {
       const session = await refreshSession();
-      if (session) {
-        headers['Authorization'] = `Bearer ${session.access_token}`;
-        res = await fetch(url, requestInit);
-      }
+      if (session) res = await fetch(url, requestInit);
     }
     const text = await res.text();
     let json: { data?: T; error?: { message?: string } };
@@ -78,7 +53,8 @@ async function request<T>(
     if (!res.ok) {
       return { data: null, error: { message: json.error?.message || res.statusText || 'Request failed' } };
     }
-    return { data: json.data ?? null, error: json.error || null };
+    const error = json.error ? { message: json.error.message ?? 'Request failed' } : null;
+    return { data: json.data ?? null, error };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Network error';
     return { data: null, error: { message } };
@@ -120,10 +96,14 @@ export const authApi = {
   refresh: refreshSession,
 };
 
-export function setAuthTokens(accessToken: string, refreshToken: string) {
-  setTokens(accessToken, refreshToken);
-}
+/** No-op: tokens are in httpOnly cookies. Kept for API compatibility. */
+export function setAuthTokens(_accessToken: string, _refreshToken: string) {}
 
-export function clearAuth() {
-  clearTokens();
+/** Clears auth by calling logout endpoint (clears httpOnly cookies server-side). */
+export async function clearAuth() {
+  try {
+    await fetch(`${BASE}/auth/logout`, { ...DEFAULT_FETCH_OPTIONS, method: 'POST', headers: { 'Content-Type': 'application/json' } });
+  } catch {
+    // ignore
+  }
 }

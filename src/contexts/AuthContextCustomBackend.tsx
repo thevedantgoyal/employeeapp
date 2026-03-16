@@ -2,14 +2,11 @@
  * AuthContext that uses the Node.js backend instead of Supabase.
  * Use this when VITE_USE_CUSTOM_BACKEND=true.
  * Same interface as AuthContext (user, session, loading, signIn, signOut, resetPassword). Signup removed.
+ * Auth uses httpOnly cookies; no tokens in localStorage.
  */
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { authApi, setAuthTokens, clearAuth } from "@/integrations/api/client";
-
-function getStoredToken(): string | null {
-  return localStorage.getItem("connectplus_access_token");
-}
 
 export interface CustomUser {
   id: string;
@@ -80,10 +77,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setUser(null);
           setSession(null);
         } else {
-          const token = getStoredToken();
           setUser(data.user as CustomUser);
           setSession({
-            access_token: token ?? "",
+            access_token: "httpOnly",
             user: data.user as { id: string; email: string },
           });
         }
@@ -143,7 +139,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const signOut = async () => {
     await authApi.signOut();
-    clearAuth();
+    await clearAuth();
     setUser(null);
     setSession(null);
   };
@@ -157,8 +153,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const { data, error } = await authApi.getSession();
     if (!error && data?.user) {
       setUser(data.user as CustomUser);
-      const token = getStoredToken();
-      if (token) setSession({ access_token: token, user: data.user as { id: string; email: string } });
+      setSession({ access_token: "httpOnly", user: data.user as { id: string; email: string } });
     }
   };
 

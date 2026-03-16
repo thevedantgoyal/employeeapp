@@ -6,13 +6,15 @@ import { config } from '../config/index.js';
 export function errorHandler(err, req, res, next) {
   if (res.headersSent) return next(err);
   const status = err.statusCode || err.status || 500;
-  const message = err.message || 'Internal server error';
-  if (config.nodeEnv === 'development') {
-    console.error(err);
-  }
+  const isProd = config.nodeEnv === 'production';
+  console.error(err);
+  const messageToClient =
+    isProd && status >= 500
+      ? 'Internal server error'
+      : (err.message || 'Internal server error');
   res.status(status).json({
     data: null,
-    error: { message: err.message || 'Internal server error', code: err.code },
+    error: { message: messageToClient, code: err.code },
   });
 }
 

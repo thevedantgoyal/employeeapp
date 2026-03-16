@@ -1,10 +1,21 @@
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { body } from 'express-validator';
 import * as authController from '../controllers/authController.js';
 import { authenticate } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 
 const router = Router();
+
+// Strict rate limit for auth: 10 requests per 15 minutes per IP (login, reset-password, microsoft, refresh)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: 'Too many attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+router.use(authLimiter);
 
 router.post(
   '/login',
@@ -25,7 +36,7 @@ router.post(
 
 router.post(
   '/refresh',
-  [body('refresh_token').notEmpty()],
+  [body('refresh_token').optional()],
   validate,
   authController.refresh
 );

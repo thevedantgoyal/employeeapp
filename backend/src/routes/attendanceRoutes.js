@@ -145,20 +145,40 @@ router.post('/verify-face', async (req, res) => {
       });
     }
 
-    const objectPath = getAvatarObjectPath(profile.avatar_url);
-    if (!objectPath) {
-      return res.status(403).json({
-        faceVerified: false,
-        message: 'Profile photo not found.',
-      });
-    }
-
-    const referenceFile = await storageService.getFile('avatars', objectPath);
-    if (!referenceFile || !referenceFile.file_data) {
-      return res.status(403).json({
-        faceVerified: false,
-        message: 'Profile photo not found.',
-      });
+    let referenceBuffer;
+    const avatarUrl = profile.avatar_url.trim();
+    if (avatarUrl.startsWith('data:') && avatarUrl.includes(';base64,')) {
+      const base64Part = avatarUrl.slice(avatarUrl.indexOf(';base64,') + ';base64,'.length);
+      try {
+        referenceBuffer = Buffer.from(base64Part, 'base64');
+      } catch {
+        return res.status(403).json({
+          faceVerified: false,
+          message: 'Profile photo not found.',
+        });
+      }
+      if (referenceBuffer.length === 0) {
+        return res.status(403).json({
+          faceVerified: false,
+          message: 'Profile photo not found.',
+        });
+      }
+    } else {
+      const objectPath = getAvatarObjectPath(profile.avatar_url);
+      if (!objectPath) {
+        return res.status(403).json({
+          faceVerified: false,
+          message: 'Profile photo not found.',
+        });
+      }
+      const referenceFile = await storageService.getFile('avatars', objectPath);
+      if (!referenceFile || !referenceFile.file_data) {
+        return res.status(403).json({
+          faceVerified: false,
+          message: 'Profile photo not found.',
+        });
+      }
+      referenceBuffer = referenceFile.file_data;
     }
 
     // Frontend may send raw base64 or data URL (e.g. "data:image/jpeg;base64,...") — strip prefix so decode yields valid image
@@ -185,7 +205,7 @@ router.post('/verify-face', async (req, res) => {
 
     const result = await faceVerificationService.verify(
       capturedBuffer,
-      referenceFile.file_data
+      referenceBuffer
     );
 
     if (!result.verified) {
