@@ -38,6 +38,13 @@ function normalizeTimesheetDate(value) {
   return { ok: true, value: s };
 }
 
+function parseDurationHours(value) {
+  if (value == null || value === '') return null;
+  const raw = String(value).trim().replace(',', '.');
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /**
  * Validate timesheet row for Work Type rules. Returns { valid: true } or { valid: false, message }.
  * If work_type is Project Work: project_id and task_id required, activity_title must be null.
@@ -131,6 +138,8 @@ router.get('/:table', async (req, res, next) => {
     delete filters.limit;
 
     if (table === 'tasks') {
+      console.log('[EmployeeTasks] userId:', req.userId);
+      console.log('[EmployeeTasks] profileId:', req.profileId);
       console.log('[AdminTasks] Current user id:', req.userId);
       console.log('[AdminTasks] Current user role:', req.roles);
       console.log('[GET /data/tasks] Request context:', {
@@ -309,6 +318,27 @@ router.post('/:table', async (req, res, next) => {
         if (creatorProfileId) row.assigned_by = creatorProfileId;
         console.log('[CreateTask] assigned_by (creator profile id):', row.assigned_by, 'assigned_to:', row.assigned_to);
       }
+      // Optional effort: task_date + duration_hours (no clock times on tasks)
+      if (row.task_date != null && row.task_date !== '') {
+        row.task_date = typeof row.task_date === 'string' ? row.task_date.slice(0, 10) : toDateOnlyString(row.task_date);
+      } else {
+        row.task_date = null;
+      }
+      delete row.start_time;
+      delete row.end_time;
+      const durationRaw = row.duration_hours ?? row.durationHours ?? null;
+      row.duration_hours = parseDurationHours(durationRaw);
+      if (row.duration_hours != null && !row.task_date && row.due_date) {
+        row.task_date = String(row.due_date).slice(0, 10);
+      }
+      if (row.duration_hours == null) {
+        row.task_date = null;
+      }
+      console.log('[CreateTask BE] effort fields:', {
+        task_date: row.task_date ?? null,
+        duration_hours: row.duration_hours ?? null,
+        duration_raw: durationRaw,
+      });
 
       const assigneeIds = Array.isArray(row.assigned_to)
         ? normalizeUUIDArray(row.assigned_to).filter(Boolean)
@@ -487,6 +517,22 @@ router.patch('/:table', async (req, res, next) => {
         if (!updates.assigned_at) updates.assigned_at = new Date().toISOString();
       }
       if (updates.task_type === 'separate_task') updates.project_id = null;
+
+      if (updates.task_date !== undefined) {
+        updates.task_date = updates.task_date ? String(updates.task_date).slice(0, 10) : null;
+      }
+      delete updates.start_time;
+      delete updates.end_time;
+      if (updates.duration_hours !== undefined) {
+        if (updates.duration_hours === null || updates.duration_hours === '') {
+          updates.duration_hours = null;
+          if (updates.task_date === undefined) {
+            updates.task_date = null;
+          }
+        } else {
+          updates.duration_hours = parseDurationHours(updates.duration_hours);
+        }
+      }
     }
 
     if (table === 'timesheets' && id) {

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion } from "framer-motion";
 import {
   Plus,
@@ -20,6 +20,7 @@ import {
   GanttChart,
   Briefcase,
   X,
+  Users,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,8 +54,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format } from "date-fns";
 import { EditTaskModal } from "./EditTaskModal";
+import { DeptTaskForm } from "@/components/tasks/DeptTaskForm";
+import { TaskTimeSlotFields } from "@/components/tasks/TaskTimeSlotFields";
+import { WorkloadModal, type WorkloadLevel } from "@/components/tasks/WorkloadModal";
+import { api } from "@/integrations/api/client";
 import { cn } from "@/lib/utils";
 
 const containerVariants = {
@@ -73,6 +78,13 @@ const priorityColors = {
   high: "bg-orange-500/10 text-orange-600",
   urgent: "bg-destructive/10 text-destructive",
 };
+
+function parseDurationInput(value: string): number | null {
+  const raw = String(value ?? "").trim().replace(",", ".");
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 type ViewMode = "list" | "kanban" | "swimlane" | "dashboard" | "gantt";
 
@@ -100,6 +112,8 @@ export const TaskManagement = () => {
   const [assigneePopoverOpen, setAssigneePopoverOpen] = useState(false);
   const [assignModeDialogOpen, setAssignModeDialogOpen] = useState(false);
   const [assignMode, setAssignMode] = useState<"individual" | "shared">("individual");
+  const [durationHours, setDurationHours] = useState("");
+  const [useTimeSlot, setUseTimeSlot] = useState(false);
   const [pendingCreatePayload, setPendingCreatePayload] = useState<{
     title: string;
     description?: string;
@@ -108,7 +122,14 @@ export const TaskManagement = () => {
     priority: string;
     dueDate: string;
     taskType: "project_task" | "separate_task";
+    taskDate?: string;
+    durationHours?: number;
   } | null>(null);
+  const [workloadModalOpen, setWorkloadModalOpen] = useState(false);
+  const [assigneeWorkloadMap, setAssigneeWorkloadMap] = useState<Record<string, WorkloadLevel>>({});
+  const [assigneeNextDue, setAssigneeNextDue] = useState<
+    Record<string, { title: string; due_date: string; duration_hours: number | null }>
+  >({});
 
   const { user } = useAuth();
   const isSubadmin = (user as { userType?: string; external_role?: string } | null)?.userType === "SENIOR_MANAGER"
@@ -164,6 +185,33 @@ export const TaskManagement = () => {
     return managerProjects.find((p) => p.id === projectId)?.name ?? projects.find((p) => p.id === projectId)?.name ?? null;
   }, [taskType, projectId, managerProjects, projects]);
 
+  const availableEmployeeProfileIds = useMemo(
+    () => availableEmployees.map((e) => e.id).filter(Boolean),
+    [availableEmployees]
+  );
+
+  useEffect(() => {
+    if (availableEmployeeProfileIds.length === 0) {
+      setAssigneeNextDue({});
+      return;
+    }
+    let cancelled = false;
+    const ids = availableEmployeeProfileIds.join(",");
+    api
+      .get<Record<string, { title: string; due_date: string; duration_hours: number | null }>>(
+        "/tasks/next-due-by-assignees",
+        { profileIds: ids }
+      )
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error || !data) return;
+        setAssigneeNextDue(data);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [availableEmployeeProfileIds.join(",")]);
+
   const resetForm = () => {
     setTitle("");
     setDescription("");
@@ -171,6 +219,8 @@ export const TaskManagement = () => {
     setProjectId("");
     setPriority("medium");
     setDueDate("");
+    setDurationHours("");
+    setUseTimeSlot(false);
     setTaskType("project_task");
     setAssigneeSearch("");
     setShowCreateForm(false);
@@ -207,6 +257,8 @@ export const TaskManagement = () => {
     dueDate: string;
     taskType: "project_task" | "separate_task";
     assignMode?: "individual" | "shared";
+    taskDate?: string;
+    durationHours?: number;
   }) => {
     const result = await createTask.mutateAsync(payload);
     const createdTasks = Array.isArray(result) ? result : result ? [result] : [];
@@ -242,6 +294,13 @@ export const TaskManagement = () => {
       toast.error("Please select at least one employee");
       return;
     }
+    const parsedDuration = parseDurationInput(durationHours);
+    if (useTimeSlot) {
+      if (parsedDuration == null) {
+        toast.error("Enter valid duration hours");
+        return;
+      }
+    }
     const payload = {
       title: title.trim(),
       description: description.trim() || undefined,
@@ -250,6 +309,8 @@ export const TaskManagement = () => {
       priority,
       dueDate: dueDate || undefined,
       taskType,
+      taskDate: useTimeSlot && dueDate ? dueDate.slice(0, 10) : undefined,
+      durationHours: useTimeSlot ? parsedDuration ?? undefined : undefined,
     };
     if (taskType === "separate_task" && assignedToIds.length > 1) {
       setPendingCreatePayload(payload);
@@ -344,6 +405,8 @@ export const TaskManagement = () => {
       reassignment_count: ((task as Record<string, unknown>).reassignment_count as number | undefined) ?? 0,
       blocked_reason: ((task as Record<string, unknown>).blocked_reason as string | null) ?? null,
       task_type: ((task as Record<string, unknown>).task_type as string | null) ?? null,
+      task_date: ((task as Record<string, unknown>).task_date as string | null) ?? null,
+      duration_hours: ((task as Record<string, unknown>).duration_hours as number | null) ?? null,
     });
     setDrawerOpen(true);
   };
@@ -408,6 +471,23 @@ export const TaskManagement = () => {
 
   const isLoading = membersLoading || projectsLoading || tasksLoading;
 
+  const renderAssigneeDeadline = (profileId: string) => {
+    const nd = assigneeNextDue[profileId];
+    if (!nd?.due_date) return null;
+    const dh = nd.duration_hours;
+    return (
+      <p className="text-[11px] text-primary/90 mt-0.5 truncate">
+        Next due: {format(new Date(nd.due_date), "dd MMM yyyy")}
+        {dh != null && dh > 0 && (
+          <>
+            {" "}
+            · ⏱ {Math.floor(dh)}h {String(Math.round((dh % 1) * 60)).padStart(2, "0")}m
+          </>
+        )}
+      </p>
+    );
+  };
+
   const viewModes = [
     { value: "list" as ViewMode, icon: LayoutList, label: "List" },
     { value: "kanban" as ViewMode, icon: Columns3, label: "Kanban" },
@@ -466,6 +546,13 @@ export const TaskManagement = () => {
             New Task
           </h3>
 
+          {isSubadmin ? (
+            <DeptTaskForm
+              onSuccess={() => setShowCreateForm(false)}
+              onCancel={() => setShowCreateForm(false)}
+            />
+          ) : (
+            <>
           {/* Task Type Selection */}
           <div className="flex gap-2">
             <button
@@ -531,52 +618,77 @@ export const TaskManagement = () => {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Popover open={assigneePopoverOpen} onOpenChange={setAssigneePopoverOpen}>
-                <PopoverTrigger asChild>
+              <div className="rounded-xl border border-border bg-background p-3 space-y-3">
+                {(taskType === "separate_task" && availableEmployees.length > 0) || (taskType === "project_task" && projectId && availableEmployees.length > 0) ? (
                   <button
                     type="button"
-                    disabled={taskType === "project_task" && !projectId}
-                    className={cn(
-                      "relative w-full min-h-[44px] p-3 pr-10 rounded-xl border border-border bg-background text-left focus:outline-none focus:ring-2 focus:ring-primary/20 flex flex-wrap items-center gap-2",
-                      taskType === "project_task" && !projectId && "opacity-60 cursor-not-allowed"
-                    )}
+                    onClick={() => setWorkloadModalOpen(true)}
+                    className="w-full flex items-center gap-2 p-2.5 rounded-lg border border-border hover:bg-muted/50 text-left"
                   >
-                    <User className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                    {assignedToIds.length === 0 ? (
-                      <span className="text-muted-foreground">
-                        {taskType === "project_task" && !projectId
-                          ? "Select a project first"
-                          : "Assign to *"}
-                      </span>
-                    ) : (
-                      <>
-                        <span className="text-xs text-muted-foreground font-medium">
-                          Assign To ({assignedToIds.length} selected)
-                        </span>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {assignedToIds.map((id) => {
-                            const m = availableEmployees.find((e) => e.id === id);
-                            return (
-                              <span
-                                key={id}
-                                className="inline-flex items-center gap-0.5 pl-1.5 pr-1 py-0.5 rounded-md bg-primary/10 text-primary text-xs"
-                              >
-                                {m?.full_name ?? id}
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); setAssignedToIds((prev) => prev.filter((x) => x !== id)); }}
-                                  className="p-0.5 hover:bg-primary/20 rounded"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </>
-                    )}
+                    <Users className="w-4 h-4 text-primary shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium">View Team Workload</p>
+                      <p className="text-xs text-muted-foreground">See who has capacity before assigning</p>
+                    </div>
                   </button>
-                </PopoverTrigger>
+                ) : null}
+                <Popover open={assigneePopoverOpen} onOpenChange={setAssigneePopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      disabled={taskType === "project_task" && !projectId}
+                      className={cn(
+                        "relative w-full min-h-[44px] p-3 pr-10 rounded-xl border border-border bg-background text-left focus:outline-none focus:ring-2 focus:ring-primary/20 flex flex-wrap items-center gap-2",
+                        taskType === "project_task" && !projectId && "opacity-60 cursor-not-allowed"
+                      )}
+                    >
+                      <User className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                      {assignedToIds.length === 0 ? (
+                        <span className="text-muted-foreground">
+                          {taskType === "project_task" && !projectId
+                            ? "Select a project first"
+                            : "Assign to *"}
+                        </span>
+                      ) : (
+                        <>
+                          <span className="text-xs text-muted-foreground font-medium">
+                            Assign To ({assignedToIds.length} selected)
+                          </span>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {assignedToIds.map((id) => {
+                              const m = availableEmployees.find((e) => e.id === id);
+                              const wl = assigneeWorkloadMap[id];
+                              return (
+                                <span
+                                  key={id}
+                                  className="inline-flex items-center gap-0.5 pl-1.5 pr-1 py-0.5 rounded-md bg-primary/10 text-primary text-xs"
+                                >
+                                  {wl && (
+                                    <span
+                                      className={cn(
+                                        "w-1.5 h-1.5 rounded-full shrink-0",
+                                        wl === "light" && "bg-emerald-500",
+                                        wl === "moderate" && "bg-amber-500",
+                                        wl === "heavy" && "bg-red-500"
+                                      )}
+                                    />
+                                  )}
+                                  {m?.full_name ?? id}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); setAssignedToIds((prev) => prev.filter((x) => x !== id)); }}
+                                    className="p-0.5 hover:bg-primary/20 rounded"
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </button>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </>
+                      )}
+                    </button>
+                  </PopoverTrigger>
                 <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[280px] p-0" align="start">
                   <div className="p-2 border-b border-border">
                     <Input
@@ -654,6 +766,7 @@ export const TaskManagement = () => {
                                 <p className="text-xs text-muted-foreground truncate">
                                   {[member.job_title, member.employee_code].filter(Boolean).join(" · ") || "—"}
                                 </p>
+                                {renderAssigneeDeadline(member.id)}
                               </div>
                             </label>
                           ))
@@ -697,6 +810,7 @@ export const TaskManagement = () => {
                                     <p className="text-xs text-muted-foreground truncate">
                                       {(member as { external_sub_role?: string }).external_sub_role || "Senior"}
                                     </p>
+                                    {renderAssigneeDeadline(member.id)}
                                   </div>
                                 </label>
                               ))}
@@ -733,6 +847,7 @@ export const TaskManagement = () => {
                                     <p className="text-xs text-muted-foreground truncate">
                                       {[member.job_title, member.employee_code].filter(Boolean).join(" · ") || "—"}
                                     </p>
+                                    {renderAssigneeDeadline(member.id)}
                                   </div>
                                 </label>
                               ))}
@@ -769,6 +884,7 @@ export const TaskManagement = () => {
                                     <p className="text-xs text-muted-foreground truncate">
                                       {[member.job_title, member.employee_code].filter(Boolean).join(" · ") || "—"}
                                     </p>
+                                    {renderAssigneeDeadline(member.id)}
                                   </div>
                                 </label>
                               ))}
@@ -800,7 +916,10 @@ export const TaskManagement = () => {
                                 );
                               }}
                             />
-                            <span className="text-sm">{member.full_name}</span>
+                            <div className="min-w-0">
+                              <span className="text-sm block">{member.full_name}</span>
+                              {renderAssigneeDeadline(member.id)}
+                            </div>
                           </label>
                         ))
                       )
@@ -808,6 +927,7 @@ export const TaskManagement = () => {
                   </div>
                 </PopoverContent>
               </Popover>
+              </div>
             </div>
 
             <div className="relative">
@@ -835,6 +955,19 @@ export const TaskManagement = () => {
             <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
           </div>
 
+          <TaskTimeSlotFields
+            enabled={useTimeSlot}
+            onEnabledChange={(enabled) => {
+              setUseTimeSlot(enabled);
+              if (!enabled) {
+                setDurationHours("");
+              }
+            }}
+            durationHours={durationHours}
+            onDurationHoursChange={setDurationHours}
+            dueDate={dueDate || undefined}
+          />
+
           <div className="flex gap-2 pt-2">
             <Button
               onClick={handleCreateTask}
@@ -852,8 +985,34 @@ export const TaskManagement = () => {
               Cancel
             </Button>
           </div>
-        </motion.div>
-      )}
+            </>
+          )}
+
+      <WorkloadModal
+        open={workloadModalOpen}
+        onOpenChange={setWorkloadModalOpen}
+        assignableEmployees={availableEmployees
+          .map((e) => {
+            const uid = "user_id" in e ? (e as { user_id?: string }).user_id : undefined;
+            if (!uid) return null;
+            return {
+              id: e.id,
+              user_id: uid,
+              full_name: e.full_name,
+              job_title: ("job_title" in e ? e.job_title : null) ?? null,
+              department: ("department" in e ? (e as { department?: string | null }).department : null) ?? null,
+              avatar_url: ("avatar_url" in e ? e.avatar_url : null) ?? null,
+              employee_code: ("employee_code" in e ? e.employee_code : null) ?? null,
+            };
+          })
+          .filter((e): e is NonNullable<typeof e> => e != null)}
+        initialSelectedProfileIds={assignedToIds}
+        onAssignSelected={(profileIds, workloadMap) => {
+          setAssignedToIds(profileIds);
+          setAssigneeWorkloadMap(workloadMap);
+        }}
+        title="Team Workload"
+      />
 
       {/* Assign mode dialog (standalone task, 2+ assignees) */}
       <Dialog open={assignModeDialogOpen} onOpenChange={(open) => { if (!open) setPendingCreatePayload(null); setAssignModeDialogOpen(open); }}>
@@ -906,6 +1065,9 @@ export const TaskManagement = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+        </motion.div>
+      )}
 
       {/* Reassign Modal */}
       {reassignTaskId && (

@@ -11,6 +11,8 @@ export interface HomeTask {
   due_date: string | null;
   priority: string | null;
   status: string | null;
+  task_date?: string | null;
+  duration_hours?: number | null;
 }
 
 export interface HomeStats {
@@ -39,7 +41,11 @@ export const useHomeTasks = () => {
 
       const { data, error } = await db
         .from("tasks")
-        .select("id, title, description, due_date, priority, status, project_id")
+        .select(`
+          id, title, description, due_date, priority, status, project_id,
+          task_date, duration_hours,
+          projects (name)
+        `)
         .eq("assigned_to", profile.id)
         .neq("status", "completed")
         .order("due_date", { ascending: true })
@@ -52,10 +58,12 @@ export const useHomeTasks = () => {
         id: task.id ?? "",
         title: task.title ?? "",
         description: task.description ?? null,
-        project_name: "No Project",
+        project_name: (task.projects as { name?: string } | undefined)?.name || "No Project",
         due_date: task.due_date ?? null,
         priority: task.priority ?? null,
         status: (task.status as string) ?? null,
+        task_date: task.task_date ?? null,
+        duration_hours: task.duration_hours != null ? Number(task.duration_hours) : null,
       }));
     },
     enabled: !!user,

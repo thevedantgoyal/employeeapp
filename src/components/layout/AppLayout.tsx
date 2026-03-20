@@ -4,6 +4,7 @@ import { Menu } from "lucide-react";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
 import { NotificationPanel } from "@/components/notifications/NotificationPanel";
 import { NavigationDrawer } from "./NavigationDrawer";
+import { TaskDeadlineReminder } from "@/components/tasks/TaskDeadlineReminder";
 
 const pageTitles: Record<string, string> = {
   "/": "Dashboard",
@@ -63,6 +64,8 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
         isOpen={isNotificationsOpen}
         onClose={() => setIsNotificationsOpen(false)}
       />
+
+      <TaskDeadlineReminder />
     </div>
   );
 };

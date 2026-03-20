@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useUserRoles } from "@/hooks/useUserRoles";
 import { useAuth } from "@/contexts/AuthContext";
+import { isSubadmin } from "@/lib/authUtils";
 
 interface NavItem {
   icon: LucideIcon;
@@ -36,6 +37,10 @@ export const RoleBasedNav = () => {
 
   // Filter nav items based on user roles
   const visibleItems = allNavItems.filter((item) => {
+    // Projects: hide for subadmin
+    if (item.path === "/projects") {
+      return !isSubadmin(user);
+    }
     // Team / Manager: show only for MANAGER and SENIOR_MANAGER; hide for EMPLOYEE
     if (item.path === "/manager") {
       return userType === "MANAGER" || userType === "SENIOR_MANAGER";

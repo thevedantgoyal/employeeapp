@@ -22,6 +22,7 @@ import {
   EyeOff,
   AlertTriangle,
   Crown,
+  ListTodo,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { db } from "@/integrations/api/db";
@@ -33,6 +34,7 @@ import { EmailSettings } from "@/components/admin/EmailSettings";
 import { ApiImportSection } from "@/components/admin/ApiImportSection";
 import { ScrollablePillRow } from "@/components/ui/scrollable-pill-row";
 import { NotificationBroadcast } from "@/components/admin/NotificationBroadcast";
+import { TaskTemplatesManagement } from "@/components/admin/TaskTemplatesManagement";
 import {
   Dialog,
   DialogContent,
@@ -85,7 +87,7 @@ const itemVariants = {
   visible: { opacity: 1, y: 0 },
 };
 
-type TabType = "overview" | "employees" | "teams" | "apiImport" | "notifications" | "settings";
+type TabType = "overview" | "employees" | "teams" | "apiImport" | "taskTemplates" | "notifications" | "settings";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -258,6 +260,7 @@ const AdminDashboard = () => {
     { id: "employees", label: "Employees", icon: Users },
     { id: "teams", label: "Teams", icon: UsersRound },
     { id: "apiImport", label: "API Import", icon: Globe },
+    { id: "taskTemplates", label: "Task Templates", icon: ListTodo },
     { id: "notifications", label: "Broadcast", icon: Bell },
     { id: "settings", label: "Settings", icon: Settings },
   ];
@@ -513,6 +516,13 @@ const AdminDashboard = () => {
         {activeTab === "apiImport" && (
           <motion.div variants={containerVariants} initial="hidden" animate="visible">
             <ApiImportSection onFetchSuccess={fetchEmployees} />
+          </motion.div>
+        )}
+
+        {/* Task Templates Tab */}
+        {activeTab === "taskTemplates" && (
+          <motion.div variants={containerVariants} initial="hidden" animate="visible">
+            <TaskTemplatesManagement />
           </motion.div>
         )}
 

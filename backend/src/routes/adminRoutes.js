@@ -16,4 +16,10 @@ router.post('/reset-database', adminController.resetDatabase);
 router.get('/employees/:userId/projects', adminController.getEmployeeProjects);
 router.get('/employees/:userId/stats', adminController.getEmployeeStats);
 
+router.get('/task-templates', adminController.getTaskTemplates);
+router.get('/task-templates/job-titles', adminController.getTaskTemplateJobTitles);
+router.post('/task-templates', adminController.createTaskTemplate);
+router.patch('/task-templates/:id', adminController.updateTaskTemplate);
+router.delete('/task-templates/:id', adminController.deleteTaskTemplate);
+
 export default router;

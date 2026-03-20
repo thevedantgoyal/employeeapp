@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
+import { isSubadmin } from "@/lib/authUtils";
 import { ConnectPlusLoader } from "@/components/ui/ConnectPlusLoader";
 import { useUserRoles } from "@/hooks/useUserRoles";
 import { useUnseenTaskCounts } from "@/hooks/useProjectManagement";
@@ -115,6 +116,10 @@ export const NavigationDrawer = ({ open, onOpenChange }: NavigationDrawerProps) 
   }
 
   const isVisible = (item: NavItem) => {
+    // Projects: hide for subadmin (CEO, CTO, Director, VP, CFO, HR, etc.)
+    if (item.path === "/projects") {
+      return !isSubadmin(user);
+    }
     // Team / Manager: show only for MANAGER and SENIOR_MANAGER (external_role); hide for EMPLOYEE
     if (item.path === "/manager") {
       return userType === "MANAGER" || userType === "SENIOR_MANAGER";

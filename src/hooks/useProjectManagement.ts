@@ -375,6 +375,9 @@ export const useMarkTaskSeenById = () => {
 
   return useMutation({
     mutationFn: async (taskId: string) => {
+      if (!taskId || typeof taskId !== "string" || taskId.trim() === "") {
+        throw new Error("Task ID is required to mark task as seen");
+      }
       const { error } = await db
         .from("tasks")
         .update({ is_seen: true })

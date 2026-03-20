@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { ClipboardList, LayoutList, Columns3, GanttChart, Folder, ListTodo } from "lucide-react";
 import { ConnectPlusLoader } from "@/components/ui/ConnectPlusLoader";
 import { TaskCard } from "@/components/cards/TaskCard";
-import { useTasks, formatDueLabel } from "@/hooks/useTasks";
+import { useTasks, formatDueLabel, formatTaskDueLabel } from "@/hooks/useTasks";
 import { TaskDetailDrawer, TaskDetailData } from "@/components/tasks/TaskDetailDrawer";
 import { KanbanBoard } from "@/components/kanban/KanbanBoard";
 import { KanbanCardData } from "@/components/kanban/KanbanCard";
@@ -330,10 +330,13 @@ const TasksPage = () => {
                 title={task.title}
                 description={task.description || undefined}
                 project={task.project_name || "No Project"}
-                dueLabel={formatDueLabel(task.due_date)}
+                dueLabel={formatTaskDueLabel(task)}
                 priority={task.priority}
                 status={task.status}
                 reassignmentCount={task.reassignment_count}
+                dueDate={task.due_date}
+                taskDate={task.task_date}
+                durationHours={task.duration_hours}
                 onClick={() => handleTaskClick(task)}
                 onStatusChange={(newStatus) => handleStatusUpdate(task.id, task.status, newStatus)}
                 isEmployee

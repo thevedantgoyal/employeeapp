@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { 
   CheckCircle, XCircle, Clock, User, FileText, ExternalLink,
@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { usePendingContributions, useReviewContribution } from "@/hooks/useManagerReview";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { isSubadmin } from "@/lib/authUtils";
 import { TaskManagement } from "@/components/manager/TaskManagement";
 import { ProjectManagement } from "@/components/manager/ProjectManagement";
 
@@ -25,11 +27,19 @@ const itemVariants = {
 type TabType = "contributions" | "tasks" | "projects";
 
 const ManagerDashboard = () => {
+  const { user } = useAuth();
+  const subadmin = isSubadmin(user);
   const [activeTab, setActiveTab] = useState<TabType>("contributions");
   const { data: contributions, isLoading } = usePendingContributions();
   const reviewMutation = useReviewContribution();
   const [reviewingId, setReviewingId] = useState<string | null>(null);
   const [reviewNotes, setReviewNotes] = useState("");
+
+  useEffect(() => {
+    if (subadmin && activeTab === "projects") {
+      setActiveTab("tasks");
+    }
+  }, [subadmin, activeTab]);
 
   const handleReview = async (id: string, status: "approved" | "rejected") => {
     try {
@@ -43,7 +53,7 @@ const ManagerDashboard = () => {
   const tabs = [
     { id: "contributions" as TabType, label: "Contributions", icon: CheckSquare },
     { id: "tasks" as TabType, label: "Tasks", icon: ClipboardList },
-    { id: "projects" as TabType, label: "Projects", icon: Folder },
+    ...(!subadmin ? [{ id: "projects" as TabType, label: "Projects", icon: Folder }] : []),
   ];
 
   return (
@@ -142,7 +152,7 @@ const ManagerDashboard = () => {
 
       {activeTab === "tasks" && <TaskManagement />}
 
-      {activeTab === "projects" && <ProjectManagement />}
+      {activeTab === "projects" && !subadmin && <ProjectManagement />}
     </>
   );
 };

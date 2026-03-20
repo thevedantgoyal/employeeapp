@@ -1003,3 +1003,150 @@ export async function getEmployeeStats(req, res, next) {
     next(err);
   }
 }
+
+/**
+ * GET /admin/task-templates
+ * Returns all templates grouped by department.
+ */
+export async function getTaskTemplates(req, res, next) {
+  try {
+    const { rows } = await query(
+      `SELECT id, department, task_title, description_hint, required_job_titles, is_active, created_at
+       FROM dept_task_templates
+       ORDER BY department ASC, task_title ASC`
+    );
+    const byDept = {};
+    for (const r of rows) {
+      if (!byDept[r.department]) byDept[r.department] = [];
+      byDept[r.department].push({
+        id: r.id,
+        task_title: r.task_title,
+        description_hint: r.description_hint,
+        required_job_titles: r.required_job_titles || [],
+        is_active: r.is_active,
+        created_at: r.created_at,
+      });
+    }
+    res.json({ data: byDept, error: null });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /admin/task-templates/job-titles
+ * Returns distinct job_titles from profiles.
+ */
+export async function getTaskTemplateJobTitles(req, res, next) {
+  try {
+    const { rows } = await query(
+      `SELECT DISTINCT job_title FROM profiles
+       WHERE job_title IS NOT NULL AND TRIM(job_title) != ''
+       ORDER BY job_title ASC`
+    );
+    res.json({ data: rows.map((r) => r.job_title.trim()), error: null });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /admin/task-templates
+ * Body: { department, task_title, description_hint?, required_job_titles?, is_active? }
+ */
+export async function createTaskTemplate(req, res, next) {
+  try {
+    const { department, task_title, description_hint, required_job_titles, is_active } = req.body || {};
+    if (!department || !task_title || typeof department !== 'string' || typeof task_title !== 'string') {
+      return res.status(400).json({ data: null, error: { message: 'department and task_title required' } });
+    }
+    const titles = Array.isArray(required_job_titles)
+      ? required_job_titles.map((t) => String(t).trim()).filter(Boolean)
+      : [];
+    const active = is_active !== false;
+    const createdBy = req.userId;
+    const { rows } = await query(
+      `INSERT INTO dept_task_templates (department, task_title, description_hint, required_job_titles, is_active, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING id, department, task_title, description_hint, required_job_titles, is_active, created_at`,
+      [department.trim(), task_title.trim(), description_hint?.trim() || null, titles, active, createdBy]
+    );
+    res.status(201).json({ data: rows[0], error: null });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /admin/task-templates/:id
+ * Body: { department?, task_title?, description_hint?, required_job_titles?, is_active? }
+ */
+export async function updateTaskTemplate(req, res, next) {
+  try {
+    const id = req.params.id;
+    const { department, task_title, description_hint, required_job_titles, is_active } = req.body || {};
+    const updates = [];
+    const values = [];
+    let i = 1;
+    if (department !== undefined) {
+      updates.push(`department = $${i}`);
+      values.push(String(department).trim());
+      i++;
+    }
+    if (task_title !== undefined) {
+      updates.push(`task_title = $${i}`);
+      values.push(String(task_title).trim());
+      i++;
+    }
+    if (description_hint !== undefined) {
+      updates.push(`description_hint = $${i}`);
+      values.push(description_hint ? String(description_hint).trim() : null);
+      i++;
+    }
+    if (required_job_titles !== undefined) {
+      updates.push(`required_job_titles = $${i}`);
+      values.push(Array.isArray(required_job_titles) ? required_job_titles.map((t) => String(t).trim()).filter(Boolean) : []);
+      i++;
+    }
+    if (is_active !== undefined) {
+      updates.push(`is_active = $${i}`);
+      values.push(!!is_active);
+      i++;
+    }
+    if (updates.length === 0) {
+      return res.status(400).json({ data: null, error: { message: 'No fields to update' } });
+    }
+    updates.push(`updated_at = NOW()`);
+    values.push(id);
+    const { rows } = await query(
+      `UPDATE dept_task_templates SET ${updates.join(', ')} WHERE id = $${i} RETURNING id, department, task_title, description_hint, required_job_titles, is_active, updated_at`,
+      values
+    );
+    if (!rows.length) {
+      return res.status(404).json({ data: null, error: { message: 'Template not found' } });
+    }
+    res.json({ data: rows[0], error: null });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * DELETE /admin/task-templates/:id
+ * Soft delete: set is_active = false.
+ */
+export async function deleteTaskTemplate(req, res, next) {
+  try {
+    const id = req.params.id;
+    const { rowCount } = await query(
+      'UPDATE dept_task_templates SET is_active = false, updated_at = NOW() WHERE id = $1',
+      [id]
+    );
+    if (rowCount === 0) {
+      return res.status(404).json({ data: null, error: { message: 'Template not found' } });
+    }
+    res.json({ data: { id }, error: null });
+  } catch (err) {
+    next(err);
+  }
+}

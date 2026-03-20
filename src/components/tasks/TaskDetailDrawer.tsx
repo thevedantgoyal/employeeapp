@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Drawer,
   DrawerContent,
@@ -15,7 +15,8 @@ import { SubtasksSection } from "./SubtasksSection";
 import { DependenciesSection } from "./DependenciesSection";
 import { TagsSection } from "./TagsSection";
 import { Calendar, Folder, User, Flag, RefreshCw } from "lucide-react";
-import { formatDistanceToNow, isPast } from "date-fns";
+import { formatDistanceToNow, isPast, format } from "date-fns";
+import { cn } from "@/lib/utils";
 
 export interface TaskDetailData {
   id: string;
@@ -29,6 +30,8 @@ export interface TaskDetailData {
   reassignment_count?: number;
   blocked_reason?: string | null;
   task_type?: string | null;
+  task_date?: string | null;
+  duration_hours?: number | null;
 }
 
 interface TaskDetailDrawerProps {
@@ -60,10 +63,31 @@ export const TaskDetailDrawer = ({
   allTasks = [],
 }: TaskDetailDrawerProps) => {
   const [activeTab, setActiveTab] = useState("details");
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  const isOverdue = !!(task?.due_date && isPast(new Date(task.due_date)) && task.status !== "completed" && task.status !== "approved");
+  const deadlineStatus = useMemo(() => {
+    const raw = task?.due_date || task?.task_date;
+    if (!raw || task?.status === "completed" || task?.status === "approved") return null;
+    const end = new Date(raw);
+    if (Number.isNaN(end.getTime())) return null;
+    const endDay = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
+    if (now > endDay) return { label: "Past deadline", className: "bg-destructive/10 text-destructive" as const };
+    const ms = endDay.getTime() - now.getTime();
+    if (ms > 48 * 60 * 60 * 1000) return null;
+    const h = Math.floor(ms / (60 * 60 * 1000));
+    const m = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
+    return {
+      label: h > 0 ? `Due in ${h}h ${String(m).padStart(2, "0")}m` : `Due in ${m}m`,
+      className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" as const,
+    };
+  }, [task?.due_date, task?.task_date, task?.status, now]);
 
   if (!task) return null;
-
-  const isOverdue = task.due_date && isPast(new Date(task.due_date)) && task.status !== "completed" && task.status !== "approved";
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
@@ -134,6 +158,31 @@ export const TaskDetailDrawer = ({
                     </span>
                   </div>
                 )}
+                {(task.duration_hours != null && task.duration_hours > 0) || task.task_date ? (
+                  <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
+                    <p className="text-sm font-medium">Effort & schedule</p>
+                    {task.task_date && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <Calendar className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-muted-foreground">Work date:</span>
+                        <span className="font-medium">{format(new Date(task.task_date), "dd MMM yyyy")}</span>
+                      </div>
+                    )}
+                    {task.duration_hours != null && task.duration_hours > 0 && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="text-muted-foreground">Estimated duration:</span>
+                        <span className="font-medium">
+                          {Math.floor(task.duration_hours)}h {String(Math.round((task.duration_hours % 1) * 60)).padStart(2, "0")}m
+                        </span>
+                      </div>
+                    )}
+                    {deadlineStatus && (
+                      <span className={cn("inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full", deadlineStatus.className)}>
+                        {deadlineStatus.label}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
                 {task.task_type && (
                   <div className="flex items-center gap-2 text-sm">
                     <span className="text-muted-foreground">Type:</span>

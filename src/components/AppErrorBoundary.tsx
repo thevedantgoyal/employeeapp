@@ -1,5 +1,4 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { Link } from "react-router-dom";
 import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -42,7 +41,7 @@ export class AppErrorBoundary extends Component<Props, State> {
             </p>
             <div className="flex flex-col sm:flex-row gap-2 justify-center pt-2">
               <Button asChild variant="default">
-                <Link to="/auth">Go to sign in</Link>
+                <a href="/auth">Go to sign in</a>
               </Button>
               <Button
                 variant="outline"

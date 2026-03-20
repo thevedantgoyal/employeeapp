@@ -29,7 +29,7 @@ import TimesheetPage from "./pages/TimesheetPage";
 import RoomBookingPage from "./pages/RoomBookingPage";
 import RequestsPage from "./pages/RequestsPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
-import EmployeeProjectsPage from "./pages/EmployeeProjectsPage";
+import { ProjectsRouteGuard } from "./components/auth/ProjectsRouteGuard";
 import CompleteProfilePage from "./pages/CompleteProfilePage";
 import OnboardingWelcomePage from "./pages/OnboardingWelcomePage";
 import OnboardingDetailsPage from "./pages/OnboardingDetailsPage";
@@ -53,13 +53,13 @@ const App = () => {
   const handleSplashComplete = useCallback(() => setShowSplash(false), []);
 
   return (
-    <AppErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
-          <BrowserRouter>
+    <BrowserRouter>
+      <AppErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
             <AuthProvider>
               <Routes>
               <Route path="/auth" element={<AuthPage />} />
@@ -84,7 +84,7 @@ const App = () => {
               <Route path="/rooms" element={<ProtectedWithLayout><RoomBookingPage /></ProtectedWithLayout>} />
               <Route path="/requests" element={<ProtectedWithLayout><RequestsPage /></ProtectedWithLayout>} />
               <Route path="/requests/:requestId" element={<ProtectedWithLayout><RequestsPage /></ProtectedWithLayout>} />
-              <Route path="/projects" element={<ProtectedWithLayout><EmployeeProjectsPage /></ProtectedWithLayout>} />
+              <Route path="/projects" element={<ProtectedWithLayout><ProjectsRouteGuard /></ProtectedWithLayout>} />
               <Route path="/manager" element={<ProtectedWithLayout><ManagerDashboard /></ProtectedWithLayout>} />
               <Route path="/reports" element={<OrganizationRoute><AppLayout><ReportsPage /></AppLayout></OrganizationRoute>} />
               <Route path="/admin" element={<AdminRoute><AppLayout><AdminDashboard /></AppLayout></AdminRoute>} />
@@ -93,10 +93,10 @@ const App = () => {
               <Route path="*" element={<NotFound />} />
               </Routes>
             </AuthProvider>
-          </BrowserRouter>
-        </TooltipProvider>
-      </QueryClientProvider>
-    </AppErrorBoundary>
+          </TooltipProvider>
+        </QueryClientProvider>
+      </AppErrorBoundary>
+    </BrowserRouter>
   );
 };
 

@@ -5,6 +5,13 @@ import { useAuth } from "@/contexts/AuthContext";
 import { sendTaskAssignedEmail } from "@/hooks/useEmailNotifications";
 import { sendPushNotification } from "@/hooks/usePushNotifications";
 
+function parseDurationHours(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const raw = String(value).trim().replace(",", ".");
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export interface TeamMember {
   id: string;
   user_id: string;
@@ -44,6 +51,8 @@ export interface ManagedTask {
   task_type: string | null;
   blocked_reason: string | null;
   reassignment_count: number;
+  task_date?: string | null;
+  duration_hours?: number | null;
 }
 
 // Fetch team members that the current user manages (direct reports) or all employees (admin/hr/subadmin with no manager)
@@ -202,6 +211,8 @@ export const useManagedTasks = () => {
           status,
           priority,
           due_date,
+          task_date,
+          duration_hours,
           created_at,
           assigned_to,
           task_type,
@@ -245,6 +256,8 @@ export const useManagedTasks = () => {
         task_type: task.task_type || "project_task",
         blocked_reason: task.blocked_reason || null,
         reassignment_count: task.reassignment_count || 0,
+        task_date: task.task_date ?? null,
+        duration_hours: task.duration_hours != null ? Number(task.duration_hours) : null,
       }));
     },
     enabled: !!user,
@@ -266,6 +279,8 @@ export const useCreateTask = () => {
       dueDate,
       taskType,
       assignMode,
+      taskDate,
+      durationHours,
     }: {
       title: string;
       description?: string;
@@ -275,6 +290,8 @@ export const useCreateTask = () => {
       dueDate?: string;
       taskType?: "project_task" | "separate_task";
       assignMode?: "individual" | "shared";
+      taskDate?: string;
+      durationHours?: number;
     }) => {
       if (!user) throw new Error("Not authenticated");
 
@@ -303,8 +320,17 @@ export const useCreateTask = () => {
           priority: priority || "medium",
           due_date: dueDate || null,
           status: "pending",
+          task_date: null,
+          duration_hours: null,
         };
         if (assignMode) body.assignMode = assignMode;
+        if (taskDate) body.task_date = taskDate;
+        const parsedDuration = parseDurationHours(durationHours);
+        if (parsedDuration != null) {
+          body.duration_hours = parsedDuration;
+          if (!body.task_date && dueDate) body.task_date = String(dueDate).slice(0, 10);
+        }
+        console.log("[CreateTask] payload:", body);
         const res = await api.post<{ id: string }[]>( "/data/tasks", body);
         if (res.error) throw new Error(res.error.message);
         if (!res.data) throw new Error("No tasks created");
@@ -326,20 +352,30 @@ export const useCreateTask = () => {
       }
 
       const singleId = assigneeIds[0] || null;
+      const insertRow: Record<string, unknown> = {
+        title,
+        description: description || null,
+        assigned_to: singleId,
+        assigned_by: managerProfile?.id || null,
+        assigned_at: singleId ? now : null,
+        project_id: projectId || null,
+        task_type: taskType === "separate_task" ? "separate_task" : "project_task",
+        priority: priority || "medium",
+        due_date: dueDate || null,
+        status: "pending",
+        task_date: null,
+        duration_hours: null,
+      };
+      if (taskDate) insertRow.task_date = taskDate;
+      const parsedDuration = parseDurationHours(durationHours);
+      if (parsedDuration != null) {
+        insertRow.duration_hours = parsedDuration;
+        if (!insertRow.task_date && dueDate) insertRow.task_date = String(dueDate).slice(0, 10);
+      }
+      console.log("[CreateTask] payload:", insertRow);
       const { data, error } = await db
         .from("tasks")
-        .insert([{
-          title,
-          description: description || null,
-          assigned_to: singleId,
-          assigned_by: managerProfile?.id || null,
-          assigned_at: singleId ? now : null,
-          project_id: projectId || null,
-          task_type: taskType === "separate_task" ? "separate_task" : "project_task",
-          priority: priority || "medium",
-          due_date: dueDate || null,
-          status: "pending",
-        }])
+        .insert([insertRow])
         .select()
         .single();
 
@@ -383,6 +419,9 @@ export const useUpdateTaskStatus = () => {
       status: string;
       blockedReason?: string;
     }) => {
+      if (!taskId || typeof taskId !== "string" || taskId.trim() === "") {
+        throw new Error("Task ID is required to update task status");
+      }
       const updateData: Record<string, unknown> = { status };
       
       if (status === "completed") {
@@ -421,6 +460,9 @@ export const useDeleteTask = () => {
   return useMutation({
     mutationFn: async (taskId: string) => {
       if (!user) throw new Error("Not authenticated");
+      if (!taskId || typeof taskId !== "string" || taskId.trim() === "") {
+        throw new Error("Task ID is required to delete task");
+      }
 
       const { data: profile } = await db
         .from("profiles")
@@ -570,6 +612,9 @@ export const useUpdateTask = () => {
       blockedReason?: string;
       taskType?: string;
     }) => {
+      if (!taskId || typeof taskId !== "string" || taskId.trim() === "") {
+        throw new Error("Task ID is required to update task");
+      }
       const updateData: Record<string, unknown> = {
         title,
         description: description || null,

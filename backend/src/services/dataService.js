@@ -104,33 +104,42 @@ export async function buildAccessFilter(tableName, userId, profileId, roles, fil
         : false;
       const isManagerOrHasReports = isManager || (!!cleanUserId && hasDirectReports);
 
-      // Dashboard list (no assigned_to filter): scope to current user's own tasks only — created by me OR assigned to me.
-      // Applies to BOTH subadmin and manager: no cross-contamination, no "view all" for subadmin, no reportees' tasks for manager.
+      // Dashboard list (no assigned_to filter): scope to current user's own tasks only — created by me OR assigned to me OR in task_assignees.
       if (!assignedTo && cleanProfileId) {
-        console.log('[buildAccessFilter tasks] Branch: dashboard scope (assigned_to OR assigned_by = profile)', { cleanProfileId, cleanUserId });
         return {
-          where: '(assigned_to = $1 OR assigned_by = $1) AND is_deleted = false',
+          where: '(assigned_to = $1 OR assigned_by = $1 OR EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = id AND ta.profile_id = $1)) AND (is_deleted = false OR is_deleted IS NULL)',
           params: [cleanProfileId],
           paramIndex: 1,
         };
       }
 
-      // Admin with assigned_to filter: still scope to own tasks when filtering by assignee
+      // Admin with assigned_to filter: still scope to own tasks when filtering by assignee (include shared tasks via task_assignees).
       if (roles && roles.includes('admin') && cleanProfileId && assignedTo === cleanProfileId) {
-        return { where: '(assigned_to = $1 OR assigned_by = $1) AND is_deleted = false', params: [cleanProfileId], paramIndex: 1 };
+        return {
+          where: '(assigned_to = $1 OR assigned_by = $1 OR EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = id AND ta.profile_id = $1)) AND (is_deleted = false OR is_deleted IS NULL)',
+          params: [cleanProfileId],
+          paramIndex: 1,
+        };
       }
 
-      // Manager's To-Do list: tasks assigned TO me only (exclude tasks I created so they don't duplicate)
+      // Manager's To-Do list: tasks assigned TO me or in task_assignees (exclude tasks I created so they don't duplicate).
       if (isManagerOrHasReports && assignedTo && cleanProfileId && assignedTo === cleanProfileId) {
         console.log('[buildAccessFilter tasks] Branch: manager To-Do (assigned_to=me)');
         return {
-          where: 'assigned_to = $1 AND is_deleted = false AND (assigned_by IS NULL OR assigned_by <> $2)',
+          where: '(assigned_to = $1 OR EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = id AND ta.profile_id = $1)) AND (is_deleted = false OR is_deleted IS NULL) AND (assigned_by IS NULL OR assigned_by <> $2)',
           params: [cleanProfileId, cleanProfileId],
           paramIndex: 2,
         };
       }
-      if (cleanProfileId && assignedTo === cleanProfileId) {
-        return { where: 'assigned_to = $1 AND is_deleted = false', params: [cleanProfileId], paramIndex: 1 };
+      // Employee (or any user) fetching own task list: include direct assignee AND shared tasks (task_assignees).
+      // Match when filter is current profile id OR when frontend mistakenly sent user id (assignedTo === cleanUserId).
+      const isOwnTaskList = assignedTo && cleanProfileId && (assignedTo === cleanProfileId || assignedTo === cleanUserId);
+      if (isOwnTaskList) {
+        return {
+          where: '(assigned_to = $1 OR EXISTS (SELECT 1 FROM task_assignees ta WHERE ta.task_id = id AND ta.profile_id = $1)) AND (is_deleted = false OR is_deleted IS NULL)',
+          params: [cleanProfileId],
+          paramIndex: 1,
+        };
       }
       if (isManagerOrHasReports && assignedTo) {
         const { rows: assigneeRows } = await query('SELECT user_id FROM profiles WHERE id = $1', [assignedTo]);
@@ -140,7 +149,7 @@ export async function buildAccessFilter(tableName, userId, profileId, roles, fil
         return { where: '1=0', params: [], paramIndex: 0 };
       }
       if (cleanProfileId) {
-        return { where: 'assigned_to = $1 AND is_deleted = false', params: [cleanProfileId], paramIndex: 1 };
+        return { where: 'assigned_to = $1 AND (is_deleted = false OR is_deleted IS NULL)', params: [cleanProfileId], paramIndex: 1 };
       }
       console.log('[buildAccessFilter tasks] Branch: 1=0 (no profile)');
       return { where: '1=0', params: [], paramIndex: 0 };
@@ -358,6 +367,10 @@ export async function selectTable(tableName, userId, profileId, roles, filters =
     const { rows } = await query(sql, params);
     if (tableName === 'tasks') {
       console.log('[selectTable tasks] Query result:', { rowCount: rows.length, firstId: rows[0]?.id });
+      console.log('[EmployeeTasks] query:', sql);
+      console.log('[EmployeeTasks] params:', params);
+      console.log('[EmployeeTasks] result count:', rows.length);
+      console.log('[EmployeeTasks] raw rows:', JSON.stringify(rows.slice(0, 3), null, 2));
     }
     return { data: rows, error: null };
   } catch (e) {

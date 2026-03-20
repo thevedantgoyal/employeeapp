@@ -7,7 +7,8 @@ import { db } from "@/integrations/api/db";
 import { TaskCard } from "@/components/cards/TaskCard";
 import { MetricCard } from "@/components/cards/MetricCard";
 import { AddWorkUpdateModal } from "@/components/modals/AddWorkUpdateModal";
-import { useHomeTasks, useHomeStats, formatDueLabel } from "@/hooks/useHomeData";
+import { useHomeTasks, useHomeStats } from "@/hooks/useHomeData";
+import { formatTaskDueLabel } from "@/hooks/useTasks";
 import { useUserRoles } from "@/hooks/useUserRoles";
 import { useMyRequests, usePendingRequestsCount } from "@/hooks/useRequests";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -174,7 +175,10 @@ const Index = () => {
                       title={task.title}
                       description={task.description || undefined}
                       project={task.project_name || "No Project"}
-                      dueLabel={formatDueLabel(task.due_date)}
+                      dueLabel={formatTaskDueLabel(task)}
+                      dueDate={task.due_date}
+                      taskDate={task.task_date}
+                      durationHours={task.duration_hours}
                       priority={task.priority}
                       status={task.status}
                     />

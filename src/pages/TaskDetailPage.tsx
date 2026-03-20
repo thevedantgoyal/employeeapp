@@ -39,6 +39,8 @@ interface TaskDetail {
   blocked_reason: string | null;
   task_type: string | null;
   created_at: string;
+  task_date?: string | null;
+  duration_hours?: number | null;
 }
 
 /** Raw task row from API (select with projects + assigned_to_profile) */
@@ -53,6 +55,8 @@ interface TaskRow {
   blocked_reason: string | null;
   reassignment_count: number;
   created_at: string;
+  task_date?: string | null;
+  duration_hours?: number | null;
   projects?: { name?: string } | null;
   assigned_to_profile?: { full_name?: string } | null;
 }
@@ -88,6 +92,7 @@ const TaskDetailPage = () => {
         .select(`
           id, title, description, status, priority, due_date,
           task_type, blocked_reason, reassignment_count, created_at,
+          task_date, duration_hours,
           projects (name),
           assigned_to_profile:profiles!tasks_assigned_to_fkey (full_name)
         `)
@@ -115,6 +120,8 @@ const TaskDetailPage = () => {
         blocked_reason: row.blocked_reason,
         task_type: row.task_type,
         created_at: row.created_at,
+        task_date: row.task_date ?? null,
+        duration_hours: row.duration_hours != null ? Number(row.duration_hours) : null,
       });
       setLoading(false);
       markTaskSeen.mutate(id);
@@ -228,6 +235,25 @@ const TaskDetailPage = () => {
           <span className="text-muted-foreground">Created:</span>
           <span className="font-medium">{format(new Date(task.created_at), "MMM d, yyyy")}</span>
         </div>
+        {(task.duration_hours != null && task.duration_hours > 0) || task.task_date ? (
+          <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
+            <p className="text-sm font-medium">Effort & schedule</p>
+            {task.task_date && (
+              <p className="text-sm">
+                <span className="text-muted-foreground">Work date:</span>{" "}
+                <span className="font-medium">{format(new Date(task.task_date), "dd MMM yyyy")}</span>
+              </p>
+            )}
+            {task.duration_hours != null && task.duration_hours > 0 && (
+              <p className="text-sm">
+                <span className="text-muted-foreground">Estimated duration:</span>{" "}
+                <span className="font-medium">
+                  {Math.floor(task.duration_hours)}h {String(Math.round((task.duration_hours % 1) * 60)).padStart(2, "0")}m
+                </span>
+              </p>
+            )}
+          </div>
+        ) : null}
 
         {task.blocked_reason && task.status === "blocked" && (
           <div className="p-3 rounded-xl bg-destructive/5 border border-destructive/20">

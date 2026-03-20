@@ -16,6 +16,8 @@ export interface Task {
   reassignment_count: number;
   assigned_to_name?: string | null;
   completed_at: string | null;
+  task_date?: string | null;
+  duration_hours?: number | null;
 }
 
 export const useTasks = () => {
@@ -49,6 +51,8 @@ export const useTasks = () => {
           reassignment_count,
           completed_at,
           is_deleted,
+          task_date,
+          duration_hours,
           projects (
             name
           )
@@ -72,6 +76,8 @@ export const useTasks = () => {
         blocked_reason: task.blocked_reason || null,
         reassignment_count: task.reassignment_count || 0,
         completed_at: (task.completed_at as string) ?? null,
+        task_date: task.task_date ?? null,
+        duration_hours: task.duration_hours != null ? Number(task.duration_hours) : null,
       }));
     },
     enabled: !!user,
@@ -80,11 +86,27 @@ export const useTasks = () => {
 
 export const formatDueLabel = (dueDate: string | null): string => {
   if (!dueDate) return "No due date";
-  
+
   const date = new Date(dueDate);
   if (isPast(date)) {
     return "Overdue";
   }
-  
+
   return `Due ${formatDistanceToNow(date, { addSuffix: true })}`;
 };
+
+/** Short due line for the top badge; date + duration show on the card row below. */
+export function formatTaskDueLabel(task: {
+  due_date: string | null;
+  task_date?: string | null;
+  duration_hours?: number | null;
+  status?: string | null;
+}): string {
+  const dateStr = task.task_date || task.due_date;
+  if (!dateStr) return "No due date";
+  const date = new Date(dateStr);
+  if (isPast(date) && task.status !== "completed" && task.status !== "approved") {
+    return "Overdue";
+  }
+  return `Due ${formatDistanceToNow(date, { addSuffix: true })}`;
+}

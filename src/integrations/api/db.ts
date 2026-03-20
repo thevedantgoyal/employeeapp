@@ -63,8 +63,14 @@ function createBuilder(table: string) {
     }
     if (method === "PATCH") {
       const id = params.id ?? params.user_id;
+      // Tasks table requires id in query; missing id causes 400
+      if (table === "tasks" && (id == null || id === "")) {
+        return { data: null, error: { message: "Task update requires task id (use .eq('id', taskId) before update)" } };
+      }
       const q = id != null ? (typeof id === "string" ? { id } : { user_id: id }) : {};
-      const { data, error } = await api.patch<unknown>(`${path}?${new URLSearchParams(buildParams(q) as Record<string, string>).toString()}`, body);
+      const queryString = new URLSearchParams(buildParams(q) as Record<string, string>).toString();
+      const fullPath = queryString ? `${path}?${queryString}` : path;
+      const { data, error } = await api.patch<unknown>(fullPath, body);
       return { data, error };
     }
     if (method === "DELETE") {

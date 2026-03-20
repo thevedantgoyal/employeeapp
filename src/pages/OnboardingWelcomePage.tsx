@@ -22,7 +22,7 @@ const OnboardingWelcomePage = () => {
             Welcome, {name}! 👋
           </h1>
           <p className="text-lg text-muted-foreground font-medium">
-            {ORGANIZATION_NAME}
+            Cache Digitech
           </p>
           <p className="text-muted-foreground">
             Let's get you set up. We'll show you your details and complete your profile.

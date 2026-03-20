@@ -49,15 +49,9 @@ const AuthPage = () => {
     }
   }, [navigate]);
 
-  // Redirect if already logged in
-  if (!loading && user) {
-    const t = (user as { userType?: string }).userType;
-    const dest = user.first_login ? "/onboarding" : (t === "MANAGER" || t === "SENIOR_MANAGER" ? "/manager" : "/");
-    return <Navigate to={dest} replace />;
-  }
-
   // Pre-initialize MSAL on mount so the click handler can call loginPopup() immediately (no async before it).
   // Calling loginPopup() after await import/initialize/handleRedirectPromise loses the user gesture and opens a blank popup.
+  // Must run before any conditional return to satisfy Rules of Hooks.
   useEffect(() => {
     if (!AZURE_CLIENT_ID) return;
     let cancelled = false;
@@ -109,6 +103,13 @@ const AuthPage = () => {
       cancelled = true;
     };
   }, []);
+
+  // Redirect if already logged in (after all hooks so hook count is stable)
+  if (!loading && user) {
+    const t = (user as { userType?: string }).userType;
+    const dest = user.first_login ? "/onboarding" : (t === "MANAGER" || t === "SENIOR_MANAGER" ? "/manager" : "/");
+    return <Navigate to={dest} replace />;
+  }
 
   const validateForm = () => {
     try {
@@ -269,7 +270,7 @@ const AuthPage = () => {
         >
           <div className="w-full h-full flex items-center justify-center">
             <div className="text-center text-primary-foreground">
-              <div className="text-4xl font-display font-bold mb-2">MIRROR</div>
+              <div className="text-4xl font-display font-bold mb-2">Cache Digitech</div>
               <p className="text-sm opacity-90">Performance Tracking System</p>
             </div>
           </div>
