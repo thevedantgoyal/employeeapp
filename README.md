@@ -21,6 +21,7 @@ cd <YOUR_PROJECT_NAME>
 ### 2. Install Frontend Dependencies
 
 ```bash
+cd frontend
 npm install
 ```
 
@@ -29,13 +30,14 @@ npm install
 ### 3. Start Frontend Development Server
 
 ```bash
+cd frontend
 npm run dev
 ```
 
-The frontend will start on:
+The frontend will start on (configured in Vite):
 
 ```
-http://localhost:8080
+http://localhost:3000
 ```
 
 ---
@@ -98,7 +100,7 @@ http://localhost:4000
 
 ## Frontend Environment Variables
 
-Create a `.env` file in the root directory:
+Create a `.env` file in the `frontend` directory:
 
 ```
 VITE_API_URL=http://localhost:4000/api
@@ -122,6 +124,7 @@ npm run dev
 **Terminal 2**
 
 ```bash
+cd frontend
 npm run dev
 ```
 
@@ -151,8 +154,9 @@ npm run dev
 project-root
 │
 ├── backend          # Node.js API
-├── src              # React frontend source
-├── public           # Static assets
+├── frontend         # Vite React app
+│   ├── src          # React frontend source
+│   └── public       # Static assets
 ├── docs             # Documentation
 └── README.md
 ```
