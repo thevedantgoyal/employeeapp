@@ -7,18 +7,27 @@ import { validate } from '../middleware/validate.js';
 
 const router = Router();
 
-// Strict rate limit for auth: 10 requests per 15 minutes per IP (login, reset-password, microsoft, refresh)
+/** Login, Microsoft SSO, password reset — stricter cap */
 const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
+  windowMs: 5 * 60 * 1000,
+  max: 100,
   message: { error: 'Too many attempts. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
 });
-router.use(authLimiter);
+
+/** Token refresh + session reads — higher cap */
+const refreshLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 200,
+  message: { error: 'Too many attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 router.post(
   '/login',
+  authLimiter,
   [
     body('email').isEmail().normalizeEmail(),
     body('password').notEmpty(),
@@ -29,6 +38,7 @@ router.post(
 
 router.post(
   '/microsoft',
+  authLimiter,
   [body('id_token').notEmpty().withMessage('id_token is required')],
   validate,
   authController.signInWithMicrosoft
@@ -36,12 +46,13 @@ router.post(
 
 router.post(
   '/refresh',
+  refreshLimiter,
   [body('refresh_token').optional()],
   validate,
   authController.refresh
 );
 
-router.get('/session', authController.getSession);
+router.get('/session', refreshLimiter, authController.getSession);
 
 router.post('/complete-onboarding', authenticate, authController.completeOnboarding);
 
@@ -49,6 +60,7 @@ router.post('/logout', authController.signOut);
 
 router.post(
   '/reset-password',
+  authLimiter,
   [body('email').isEmail().normalizeEmail()],
   validate,
   authController.resetPasswordRequest

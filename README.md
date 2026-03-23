@@ -98,6 +98,12 @@ http://localhost:4000
 
 ---
 
+## Production (e.g. Render)
+
+Set **`NODE_ENV=production`** on the backend service (e.g. Render **Environment** → add variable). This is required so auth cookies use **`sameSite: 'none'`** and **`secure: true`** for cross-origin requests between the hosted frontend and API.
+
+---
+
 ## Frontend Environment Variables
 
 Create a `.env` file in the `frontend` directory:

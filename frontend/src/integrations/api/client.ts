@@ -8,7 +8,14 @@ const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
 const DEFAULT_FETCH_OPTIONS: RequestInit = { credentials: 'include' };
 
+/** After a failed refresh, skip further refresh attempts for this long (avoids 401/429 loops). */
+const REFRESH_FAIL_COOLDOWN_MS = 60_000;
+let refreshSessionCooldownUntil = 0;
+
 export async function refreshSession(): Promise<{ access_token: string; refresh_token: string; user: { id: string; email: string } } | null> {
+  if (Date.now() < refreshSessionCooldownUntil) {
+    return null;
+  }
   try {
     const res = await fetch(`${BASE}/auth/refresh`, {
       ...DEFAULT_FETCH_OPTIONS,
@@ -17,9 +24,14 @@ export async function refreshSession(): Promise<{ access_token: string; refresh_
       body: JSON.stringify({}),
     });
     const json = await res.json().catch(() => ({}));
-    if (json.error || !json.data?.session) return null;
+    if (json.error || !json.data?.session) {
+      refreshSessionCooldownUntil = Date.now() + REFRESH_FAIL_COOLDOWN_MS;
+      return null;
+    }
+    refreshSessionCooldownUntil = 0;
     return json.data.session;
   } catch {
+    refreshSessionCooldownUntil = Date.now() + REFRESH_FAIL_COOLDOWN_MS;
     return null;
   }
 }

@@ -7,6 +7,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { authApi, setAuthTokens, clearAuth } from "@/integrations/api/client";
+import { clearStaleLocalhostAuthStorage } from "@/lib/authStorageCleanup";
 
 export interface CustomUser {
   id: string;
@@ -65,17 +66,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     let cancelled = false;
     const timeout = setTimeout(() => {
-      if (cancelled) return;
-      setLoading(false);
+      if (!cancelled) setLoading(false);
     }, 8000);
 
-    authApi
-      .getSession()
-      .then(({ data, error }) => {
+    (async () => {
+      try {
+        const { data, error } = await authApi.getSession();
         if (cancelled) return;
         if (error || !data?.user) {
           setUser(null);
           setSession(null);
+          await clearAuth();
+          clearStaleLocalhostAuthStorage();
         } else {
           setUser(data.user as CustomUser);
           setSession({
@@ -83,17 +85,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             user: data.user as { id: string; email: string },
           });
         }
-        setLoading(false);
-        clearTimeout(timeout);
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) {
           setUser(null);
           setSession(null);
+          await clearAuth();
+          clearStaleLocalhostAuthStorage();
+        }
+      } finally {
+        if (!cancelled) {
           setLoading(false);
           clearTimeout(timeout);
         }
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;
