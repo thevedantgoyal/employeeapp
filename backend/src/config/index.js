@@ -60,11 +60,13 @@ function getFaceVerificationApiKey() {
 function getCorsOrigins() {
   const fromEnv = getEnv('CORS_ORIGIN') || getEnv('CORS_ORIGINS');
   if (fromEnv) return fromEnv.split(',').map((o) => o.trim()).filter(Boolean);
+  // Browser Origin values (frontend URLs), not the API host — see cors({ credentials: true }) in index.js
   return [
+    'https://connectplus-employee.onrender.com',
     'http://localhost:3000',
+    'http://localhost:5173',
     'http://localhost:3001',
     'http://127.0.0.1:3000',
-    'http://localhost:5173',
     'http://localhost:8080',
   ];
 }
