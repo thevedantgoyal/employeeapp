@@ -20,7 +20,9 @@ app.use(prefix, routes);
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-const server = app.listen(config.port, () => {
+const PORT = process.env.PORT || 4000;
+
+const server = app.listen(PORT, () => {
   console.log(`ConnectPlus API listening on port ${config.port} at ${prefix}`);
 });
 
