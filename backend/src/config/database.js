@@ -28,6 +28,8 @@ try {
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
+
+    ssl: parsed.hostname !== 'localhost' ? { rejectUnauthorized: false } : false,
   };
 } catch (e) {
   throw new Error('Invalid DATABASE_URL in .env: ' + (e.message || 'parse error'));
