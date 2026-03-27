@@ -10,12 +10,21 @@ const ACCESS_MAX_AGE = 7 * 24 * 60 * 60; // 7 days
 const REFRESH_MAX_AGE = 30 * 24 * 60 * 60; // 30 days
 const COOKIE_OPTS = { httpOnly: true, path: '/' };
 
-function secure() {
-  return (process.env.NODE_ENV || '').toLowerCase() === 'production';
+function isHostedDeployment() {
+  const nodeEnv = (process.env.NODE_ENV || '').toLowerCase();
+  if (nodeEnv === 'production') return true;
+  if ((process.env.RENDER || '').toLowerCase() === 'true') return true;
+
+  const corsOrigin = (process.env.CORS_ORIGIN || process.env.CORS_ORIGINS || '').toLowerCase();
+  const firstOrigin = corsOrigin.split(',').map((s) => s.trim()).find(Boolean) || '';
+  if (firstOrigin.startsWith('https://') && !firstOrigin.includes('localhost') && !firstOrigin.includes('127.0.0.1')) {
+    return true;
+  }
+  return false;
 }
 
 export function setAuthCookies(res, accessToken, refreshToken) {
-  const isProduction = secure();
+  const isProduction = isHostedDeployment();
   const base = {
     ...COOKIE_OPTS,
     secure: isProduction,
@@ -26,7 +35,7 @@ export function setAuthCookies(res, accessToken, refreshToken) {
 }
 
 export function clearAuthCookies(res) {
-  const isProduction = secure();
+  const isProduction = isHostedDeployment();
   const base = {
     ...COOKIE_OPTS,
     secure: isProduction,
