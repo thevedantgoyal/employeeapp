@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { db } from "@/integrations/api/db";
+import { api, authApi } from "@/integrations/api/client";
 
 const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
 
@@ -197,3 +198,43 @@ export const sendPushNotification = async (
     return false;
   }
 };
+
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
+
+export function usePushNotificationsBootstrap(isAuthenticated: boolean) {
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+
+    async function setupPush() {
+      try {
+        const session = await authApi.getSession();
+        if (session.error || !session.data?.user) return;
+
+        const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        if (Notification.permission === "denied") return;
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") return;
+
+        const { data, error } = await api.get<{ publicKey: string }>("/push/vapid-public-key");
+        if (error || !data?.publicKey) return;
+
+        const applicationServerKey = urlBase64ToUint8Array(data.publicKey);
+        let subscription = await registration.pushManager.getSubscription();
+        if (!subscription) {
+          subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey });
+        }
+        await api.post("/push/subscribe", subscription.toJSON());
+      } catch (err) {
+        console.warn("Push setup failed:", err);
+      }
+    }
+
+    setupPush();
+  }, [isAuthenticated]);
+}

@@ -1,5 +1,6 @@
 import { query } from '../config/database.js';
 import { normalizeUUID } from '../utils/uuid.js';
+import { sendPushToUser } from './pushService.js';
 
 /**
  * Get manager's user_id for a given user_id (from their profile.manager_id).
@@ -168,6 +169,11 @@ export async function approveRequest(requestId, userId) {
       { request_id: rid, url: `/requests/${rid}` }
     );
   }
+  await sendPushToUser(req.submitted_by, {
+    title: 'Request approved',
+    body: 'Your request has been approved',
+    link: '/requests',
+  });
 
   const { rows: updated } = await query('SELECT * FROM requests WHERE id = $1', [rid]);
   return { data: updated[0], error: null };
@@ -209,6 +215,11 @@ export async function rejectRequest(requestId, userId, reason) {
       { request_id: rid, url: `/requests/${rid}` }
     );
   }
+  await sendPushToUser(req.submitted_by, {
+    title: 'Request rejected',
+    body: 'Your request has been rejected',
+    link: '/requests',
+  });
 
   const { rows: updated } = await query('SELECT * FROM requests WHERE id = $1', [rid]);
   return { data: updated[0], error: null };
@@ -251,6 +262,11 @@ export async function forwardRequest(requestId, userId, note) {
     `Your request "${req.title}" has been forwarded to a higher-level manager.`,
     { request_id: rid, url: `/requests/${rid}` }
   );
+  await sendPushToUser(req.submitted_by, {
+    title: 'Request forwarded',
+    body: 'Your request has been forwarded',
+    link: '/requests',
+  });
 
   const { rows: updated } = await query('SELECT * FROM requests WHERE id = $1', [rid]);
   return { data: updated[0], error: null };

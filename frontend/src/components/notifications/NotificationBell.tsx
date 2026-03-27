@@ -1,13 +1,11 @@
 import { Bell } from "lucide-react";
-import { useUnreadCount } from "@/hooks/useNotifications";
 
 interface NotificationBellProps {
   onClick: () => void;
+  unreadCount?: number;
 }
 
-export const NotificationBell = ({ onClick }: NotificationBellProps) => {
-  const { data: unreadCount = 0 } = useUnreadCount();
-
+export const NotificationBell = ({ onClick, unreadCount = 0 }: NotificationBellProps) => {
   return (
     <button
       onClick={onClick}

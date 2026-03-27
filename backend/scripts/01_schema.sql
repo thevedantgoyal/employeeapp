@@ -258,6 +258,8 @@ CREATE TABLE public.notifications (
 
 CREATE INDEX idx_notifications_user_id ON public.notifications(user_id);
 CREATE INDEX idx_notifications_read ON public.notifications(user_id, read);
+ALTER TABLE public.notifications
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
 
 -- -----------------------------------------------------------------------------
 -- 14. PUSH SUBSCRIPTIONS
@@ -844,5 +846,22 @@ CREATE TRIGGER on_team_assigned
   AFTER UPDATE ON public.profiles
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_team_assigned();
+
+-- -----------------------------------------------------------------------------
+-- PUSH SUBSCRIPTIONS
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.push_subscriptions (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id
+  ON public.push_subscriptions(user_id);
 
 COMMIT;

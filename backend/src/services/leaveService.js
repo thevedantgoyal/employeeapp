@@ -1,4 +1,5 @@
 import { query } from '../config/database.js';
+import { sendPushToUser } from './pushService.js';
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -153,6 +154,11 @@ export async function approveLeave(leaveId, approverUserId, approverProfileId, c
         }),
       ]
     );
+    await sendPushToUser(leave.user_id, {
+      title: 'Leave approved',
+      body: 'Your leave request has been approved',
+      link: '/leave',
+    });
     await client.query('COMMIT');
     return true;
   } catch (e) {
@@ -246,5 +252,10 @@ export async function rejectLeave(leaveId, approverUserId, approverProfileId, co
       }),
     ]
   );
+  await sendPushToUser(leave.user_id, {
+    title: 'Leave rejected',
+    body: `Your leave request was rejected${comment ? ': ' + comment : ''}`,
+    link: '/leave',
+  });
   return true;
 }

@@ -4,6 +4,7 @@ import { query, getPool } from '../config/database.js';
 import { selectTable, buildAccessFilter } from '../services/dataService.js';
 import { isManagerOf } from '../middleware/rbac.js';
 import { normalizeUUID, normalizeUUIDArray } from '../utils/uuid.js';
+import { sendPushToUser } from '../services/pushService.js';
 
 const router = Router();
 router.use(authenticate);
@@ -380,6 +381,19 @@ router.post('/:table', async (req, res, next) => {
             const sql = `INSERT INTO tasks (${columns}) VALUES (${placeholders}) RETURNING *`;
             const { rows: inserted } = await client.query(sql, values);
             if (inserted[0]) createdRows.push(inserted[0]);
+            const { rows: assigneeRows } = await client.query(
+              'SELECT user_id FROM profiles WHERE id = $1 LIMIT 1',
+              [assigneeId]
+            );
+            const assignedToUserId = assigneeRows[0]?.user_id;
+            const createdByUserId = normalizeUUID(req.userId);
+            if (assignedToUserId && assignedToUserId !== createdByUserId) {
+              await sendPushToUser(assignedToUserId, {
+                title: 'New task assigned',
+                body: `"${taskRow.title || 'A task'}" has been assigned to you`,
+                link: '/tasks',
+              });
+            }
           }
           await client.query('COMMIT');
           return res.status(201).json({ data: createdRows, error: null });
@@ -414,6 +428,30 @@ router.post('/:table', async (req, res, next) => {
     let responseData = rows[0];
     if (table === 'timesheets' && responseData && responseData.date != null) {
       responseData = { ...responseData, date: toDateOnlyString(responseData.date) };
+    }
+    if (table === 'tasks' && responseData?.assigned_to) {
+      const { rows: assigneeRows } = await query(
+        'SELECT user_id FROM profiles WHERE id = $1 LIMIT 1',
+        [responseData.assigned_to]
+      );
+      const assignedToUserId = assigneeRows[0]?.user_id;
+      const createdByUserId = normalizeUUID(req.userId);
+      if (assignedToUserId && assignedToUserId !== createdByUserId) {
+        await sendPushToUser(assignedToUserId, {
+          title: 'New task assigned',
+          body: `"${responseData.title || 'A task'}" has been assigned to you`,
+          link: '/tasks',
+        });
+      }
+    }
+    if (table === 'room_bookings' && responseData?.booked_by && ['confirmed', 'cancelled'].includes(String(responseData.status || '').toLowerCase())) {
+      const roomName = responseData.room_name || 'Room booking';
+      const bookingDate = responseData.booking_date ? String(responseData.booking_date).slice(0, 10) : '';
+      await sendPushToUser(responseData.booked_by, {
+        title: String(responseData.status).toLowerCase() === 'confirmed' ? 'Room booking confirmed' : 'Room booking cancelled',
+        body: bookingDate ? `${roomName} on ${bookingDate}` : roomName,
+        link: '/rooms',
+      });
     }
     res.status(201).json({ data: responseData, error: null });
   } catch (err) {
@@ -598,6 +636,15 @@ router.patch('/:table', async (req, res, next) => {
     const { rows } = await query(sql, values);
     if (!rows.length) {
       return res.status(404).json({ data: null, error: { message: 'Not found' } });
+    }
+    if (table === 'room_bookings' && rows[0]?.booked_by && ['confirmed', 'cancelled'].includes(String(rows[0]?.status || '').toLowerCase())) {
+      const roomName = rows[0]?.room_name || 'Room booking';
+      const bookingDate = rows[0]?.booking_date ? String(rows[0].booking_date).slice(0, 10) : '';
+      await sendPushToUser(rows[0].booked_by, {
+        title: String(rows[0].status).toLowerCase() === 'confirmed' ? 'Room booking confirmed' : 'Room booking cancelled',
+        body: bookingDate ? `${roomName} on ${bookingDate}` : roomName,
+        link: '/rooms',
+      });
     }
     res.json({ data: rows[0], error: null });
   } catch (err) {

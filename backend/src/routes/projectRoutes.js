@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { query, getPool } from '../config/database.js';
 import { normalizeUUID, normalizeUUIDArray } from '../utils/uuid.js';
+import { sendPushToUser } from '../services/pushService.js';
 
 const router = Router();
 router.use(authenticate);
@@ -55,6 +56,20 @@ router.post('/', async (req, res, next) => {
       }
 
       await client.query('COMMIT');
+      for (const profileId of assignedIds) {
+        const { rows: memberRows } = await query(
+          'SELECT user_id FROM profiles WHERE id = $1 LIMIT 1',
+          [profileId]
+        );
+        const newMemberId = memberRows[0]?.user_id;
+        if (newMemberId) {
+          await sendPushToUser(newMemberId, {
+            title: 'Added to project',
+            body: `You have been added to "${project.name}"`,
+            link: '/projects',
+          });
+        }
+      }
       res.status(201).json({ data: project, error: null });
     } catch (txErr) {
       await client.query('ROLLBACK').catch(() => {});

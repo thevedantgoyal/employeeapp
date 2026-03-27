@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { query } from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
 import { normalizeUUID } from '../utils/uuid.js';
+import { sendPushToUser } from '../services/pushService.js';
 
 const router = Router();
 router.use(authenticate);
@@ -586,6 +587,21 @@ router.post('/dept-task', async (req, res, next) => {
           }
         }
         await client.query('COMMIT');
+        const createdByUserId = normalizeUUID(req.userId);
+        for (const createdTask of created) {
+          const { rows: assigneeRows } = await query(
+            'SELECT user_id FROM profiles WHERE id = $1 LIMIT 1',
+            [createdTask.assigned_to]
+          );
+          const assignedToUserId = assigneeRows[0]?.user_id;
+          if (assignedToUserId && assignedToUserId !== createdByUserId) {
+            await sendPushToUser(assignedToUserId, {
+              title: 'New task assigned',
+              body: `"${finalTitle}" has been assigned to you`,
+              link: '/tasks',
+            });
+          }
+        }
         res.status(201).json({ data: { created: created.length, tasks: created }, error: null });
       } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
@@ -623,6 +639,21 @@ router.post('/dept-task', async (req, res, next) => {
             'INSERT INTO task_assignees (task_id, profile_id) VALUES ($1, $2) ON CONFLICT (task_id, profile_id) DO NOTHING',
             [taskId, pid]
           );
+        }
+        const createdByUserId = normalizeUUID(req.userId);
+        for (const pid of assigneeIds) {
+          const { rows: assigneeRows } = await query(
+            'SELECT user_id FROM profiles WHERE id = $1 LIMIT 1',
+            [pid]
+          );
+          const assignedToUserId = assigneeRows[0]?.user_id;
+          if (assignedToUserId && assignedToUserId !== createdByUserId) {
+            await sendPushToUser(assignedToUserId, {
+              title: 'New task assigned',
+              body: `"${finalTitle}" has been assigned to you`,
+              link: '/tasks',
+            });
+          }
         }
         created.push(ins[0]);
         res.status(201).json({ data: { created: 1, tasks: created }, error: null });

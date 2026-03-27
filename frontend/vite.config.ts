@@ -19,6 +19,9 @@ export default defineConfig(({ mode }) => ({
     // PWA disabled in build to avoid "Unexpected early exit" from workbox/terser; enable when fixed upstream
     mode !== "production" &&
       VitePWA({
+        strategies: "injectManifest",
+        srcDir: "public",
+        filename: "sw.js",
         registerType: "autoUpdate",
         includeAssets: ["favicon.ico", "robots.txt"],
         manifest: {
@@ -36,9 +39,6 @@ export default defineConfig(({ mode }) => ({
             { src: "/pwa-512x512.png", sizes: "512x512", type: "image/png" },
             { src: "/pwa-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
           ],
-        },
-        workbox: {
-          globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         },
       }),
   ].filter(Boolean),

@@ -52,7 +52,7 @@ export const NotificationItem = ({
       exit={{ opacity: 0, x: 10 }}
       className={cn(
         "p-4 border-b border-border last:border-0 hover:bg-muted/50 transition-colors",
-        !notification.read && "bg-primary/5"
+        !notification.is_read && "bg-primary/5"
       )}
     >
       <div className="flex gap-3">
@@ -63,8 +63,8 @@ export const NotificationItem = ({
           <div className="flex items-start justify-between gap-2">
             <h4 className={cn(
               "text-sm font-medium truncate",
-              !notification.read && "text-foreground",
-              notification.read && "text-muted-foreground"
+              !notification.is_read && "text-foreground",
+              notification.is_read && "text-muted-foreground"
             )}>
               {notification.title}
             </h4>
@@ -76,7 +76,7 @@ export const NotificationItem = ({
             {notification.message}
           </p>
           <div className="flex items-center gap-2 mt-2">
-            {!notification.read && (
+            {!notification.is_read && (
               <button
                 onClick={() => onMarkAsRead(notification.id)}
                 className="flex items-center gap-1 text-xs text-primary hover:underline"

@@ -37,6 +37,10 @@ import TaskDetailPage from "./pages/TaskDetailPage";
 import AdminEmployeeDetailPage from "./pages/AdminEmployeeDetailPage";
 import MicrosoftAuthCallbackPage from "./pages/MicrosoftAuthCallbackPage";
 import NotFound from "./pages/NotFound";
+import { usePushNotificationsBootstrap } from "./hooks/usePushNotifications";
+import { useCelebrations } from "./hooks/useCelebrations";
+import CelebrationModal from "./components/CelebrationModal";
+import { useAuth } from "@/contexts/AuthContext";
 
 const queryClient = new QueryClient();
 
@@ -48,9 +52,23 @@ const ProtectedWithLayout = ({ children }: { children: React.ReactNode }) => (
   </ProtectedRoute>
 );
 
+const CelebrationGate = () => {
+  const { user } = useAuth();
+  const { celebrations, showModal, closeModal, handleWishSent } = useCelebrations(!!user);
+  if (!showModal || celebrations.length === 0) return null;
+  return (
+    <CelebrationModal
+      celebrations={celebrations}
+      onClose={closeModal}
+      onWishSent={handleWishSent}
+    />
+  );
+};
+
 const App = () => {
   const [showSplash, setShowSplash] = useState(true);
   const handleSplashComplete = useCallback(() => setShowSplash(false), []);
+  usePushNotificationsBootstrap(true);
 
   return (
     <BrowserRouter>
@@ -61,6 +79,7 @@ const App = () => {
             <Sonner />
             {showSplash && <SplashScreen onComplete={handleSplashComplete} />}
             <AuthProvider>
+              <CelebrationGate />
               <Routes>
               <Route path="/auth" element={<AuthPage />} />
               <Route path="/auth/callback/microsoft" element={<MicrosoftAuthCallbackPage />} />

@@ -2,9 +2,10 @@ import { useState } from "react";
 import { useLocation } from "react-router-dom";
 import { Menu } from "lucide-react";
 import { NotificationBell } from "@/components/notifications/NotificationBell";
-import { NotificationPanel } from "@/components/notifications/NotificationPanel";
+import { NotificationDrawer } from "@/components/NotificationDrawer";
 import { NavigationDrawer } from "./NavigationDrawer";
 import { TaskDeadlineReminder } from "@/components/tasks/TaskDeadlineReminder";
+import { useNotifications } from "@/hooks/useNotifications";
 
 const pageTitles: Record<string, string> = {
   "/": "Dashboard",
@@ -29,8 +30,19 @@ interface AppLayoutProps {
 
 export const AppLayout = ({ children }: AppLayoutProps) => {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const location = useLocation();
+  const {
+    notifications,
+    unreadCount,
+    loading,
+    error,
+    isDrawerOpen,
+    openDrawer,
+    closeDrawer,
+    markAsRead,
+    markAllAsRead,
+    refetch,
+  } = useNotifications();
 
   const pageTitle = pageTitles[location.pathname] || "CacheTask";
 
@@ -49,7 +61,7 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
 
           <h1 className="text-base font-display font-semibold">{pageTitle}</h1>
 
-          <NotificationBell onClick={() => setIsNotificationsOpen(true)} />
+          <NotificationBell onClick={openDrawer} unreadCount={unreadCount} />
         </div>
       </header>
 
@@ -60,9 +72,16 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
 
       <NavigationDrawer open={drawerOpen} onOpenChange={setDrawerOpen} />
 
-      <NotificationPanel
-        isOpen={isNotificationsOpen}
-        onClose={() => setIsNotificationsOpen(false)}
+      <NotificationDrawer
+        notifications={notifications}
+        unreadCount={unreadCount}
+        loading={loading}
+        error={error}
+        isOpen={isDrawerOpen}
+        onClose={closeDrawer}
+        onMarkAsRead={markAsRead}
+        onMarkAllAsRead={markAllAsRead}
+        onRetry={refetch}
       />
 
       <TaskDeadlineReminder />

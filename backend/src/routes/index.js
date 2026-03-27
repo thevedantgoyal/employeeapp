@@ -14,6 +14,9 @@ import requestRoutes from './requestRoutes.js';
 import roomBookingRoutes from './roomBookingRoutes.js';
 import projectRoutes from './projectRoutes.js';
 import taskRoutes from './taskRoutes.js';
+import pushRoutes from './pushRoutes.js';
+import celebrationRoutes from './celebrationRoutes.js';
+import notificationRoutes from './notificationRoutes.js';
 
 const router = Router();
 
@@ -32,5 +35,8 @@ router.use('/data', dataRoutes);
 router.use('/storage', storageRoutes);
 router.use('/rpc', rpcRoutes);
 router.use('/admin', adminRoutes);
+router.use('/push', pushRoutes);
+router.use('/celebrations', celebrationRoutes);
+router.use('/notifications', notificationRoutes);
 
 export default router;
