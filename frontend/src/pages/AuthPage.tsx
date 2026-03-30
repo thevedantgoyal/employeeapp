@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, Mail, Lock } from "lucide-react";
@@ -8,14 +8,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-const AZURE_CLIENT_ID = import.meta.env.VITE_AZURE_CLIENT_ID || "";
-const AZURE_TENANT_ID = import.meta.env.VITE_AZURE_TENANT_ID || "common";
-const AZURE_REDIRECT_URI =
-  import.meta.env.VITE_AZURE_REDIRECT_URI ||
-  `${typeof window !== "undefined" ? window.location.origin : "http://localhost:3000"}/auth/callback/microsoft`;
-
-type MsalInstance = import("@azure/msal-browser").PublicClientApplication;
-
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
@@ -23,20 +15,17 @@ const loginSchema = z.object({
 
 const AuthPage = () => {
   const navigate = useNavigate();
-  const { user, signIn, signInWithMicrosoft, resetPassword, loading } = useAuth();
+  const { user, signIn, resetPassword, loading } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isMicrosoftLoading, setIsMicrosoftLoading] = useState(false);
-  const [msalReady, setMsalReady] = useState(false);
-  const msalInstanceRef = useRef<MsalInstance | null>(null);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
-  
+
   const [formData, setFormData] = useState({
     email: "",
     password: "",
   });
-  
+
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const navigateAfterLogin = useCallback((loggedInUser: { first_login?: boolean; userType?: string } | null) => {
@@ -49,62 +38,7 @@ const AuthPage = () => {
     }
   }, [navigate]);
 
-  // Pre-initialize MSAL on mount so the click handler can call loginPopup() immediately (no async before it).
-  // Calling loginPopup() after await import/initialize/handleRedirectPromise loses the user gesture and opens a blank popup.
-  // Must run before any conditional return to satisfy Rules of Hooks.
-  useEffect(() => {
-    if (!AZURE_CLIENT_ID) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const { PublicClientApplication, LogLevel } = await import("@azure/msal-browser");
-        const authority = `https://login.microsoftonline.com/${AZURE_TENANT_ID}`;
-        // In Azure Portal: use "Single-page application" (not "Web"), add redirect URI exactly as AZURE_REDIRECT_URI.
-        const msalConfig = {
-          auth: {
-            clientId: AZURE_CLIENT_ID,
-            authority,
-            redirectUri: AZURE_REDIRECT_URI,
-          },
-          cache: { cacheLocation: "sessionStorage" as const },
-          system: {
-            loggerOptions: {
-              logLevel: LogLevel.Verbose,
-              loggerCallback: (level: number, message: string, containsPii: boolean) => {
-                if (containsPii) return;
-                if (level === LogLevel.Error) console.error("[MSAL]", message);
-                else if (level === LogLevel.Warning) console.warn("[MSAL]", message);
-                else console.debug("[MSAL]", message);
-              },
-              piiLoggingEnabled: false,
-            },
-          },
-        };
-        console.debug("[MSAL] Config:", {
-          clientId: msalConfig.auth.clientId,
-          authority: msalConfig.auth.authority,
-          redirectUri: msalConfig.auth.redirectUri,
-          allDefined:
-            !!msalConfig.auth.clientId && !!msalConfig.auth.authority && !!msalConfig.auth.redirectUri,
-        });
-        const msal = new PublicClientApplication(msalConfig);
-        await msal.initialize();
-        if (cancelled) return;
-        msalInstanceRef.current = msal;
-        setMsalReady(true);
-      } catch (e) {
-        if (!cancelled) {
-          console.error("[MSAL] Init failed:", e);
-          setMsalReady(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Redirect if already logged in (after all hooks so hook count is stable)
+  // Redirect if already logged in
   if (!loading && user) {
     const t = (user as { userType?: string }).userType;
     const dest = user.first_login ? "/onboarding" : (t === "MANAGER" || t === "SENIOR_MANAGER" ? "/manager" : "/");
@@ -130,106 +64,13 @@ const AuthPage = () => {
     }
   };
 
-  const handleMicrosoftSignIn = async () => {
-    if (!AZURE_CLIENT_ID) {
-      toast.error("Microsoft sign-in is not configured.");
-      return;
-    }
-    const msal = msalInstanceRef.current;
-    if (!msal) {
-      toast.error("Sign-in is still loading. Please wait a moment and try again.");
-      return;
-    }
-    setIsMicrosoftLoading(true);
-    try {
-      // Only clear any pending redirect; then loginPopup must run with no other async in between.
-      try {
-        await msal.handleRedirectPromise();
-      } catch (_) {
-        // Ignore no_token_request_cache_error / state_not_found when no redirect is pending.
-      }
-      const loginRequest = { scopes: ["User.Read", "openid", "profile"] };
-      let result: { idToken?: string };
-      try {
-        result = await msal.loginPopup(loginRequest);
-      } catch (popupErr) {
-        console.error("[MSAL] loginPopup error (full):", popupErr);
-        console.error("[MSAL] loginPopup error message:", popupErr instanceof Error ? popupErr.message : String(popupErr));
-        console.error("[MSAL] loginPopup error stack:", popupErr instanceof Error ? popupErr.stack : "n/a");
-        const errStr = String(popupErr);
-        const isPopupBlocked =
-          errStr.includes("popup_window_error") ||
-          errStr.includes("popup_blocked") ||
-          errStr.includes("blocked a popup") ||
-          errStr.includes("user_cancelled");
-        if (isPopupBlocked || errStr.includes("interaction_in_progress")) {
-          toast.info("Opening sign-in in this window…");
-          await msal.loginRedirect(loginRequest);
-          return;
-        }
-        throw popupErr;
-      }
-      const idToken = result?.idToken;
-      if (!idToken) {
-        setIsMicrosoftLoading(false);
-        toast.error("Microsoft sign-in did not return a token.");
-        return;
-      }
-      const { error, user: loggedInUser } = await signInWithMicrosoft(idToken);
-      if (error) {
-        setIsMicrosoftLoading(false);
-        toast.error(error.message);
-        return;
-      }
-      toast.success("Welcome back!");
-      navigateAfterLogin(loggedInUser ?? null);
-    } catch (err) {
-      setIsMicrosoftLoading(false);
-      console.error("[MSAL] handleMicrosoftSignIn error:", err);
-      const message = err instanceof Error ? err.message : "Microsoft sign-in failed";
-      const errStr = String(err);
-      if (errStr.includes("interaction_in_progress")) {
-        toast.error("A sign-in window is already open. Please complete or close it and try again.");
-      } else if (errStr.includes("no_token_request_cache_error") || errStr.includes("state_not_found")) {
-        toast.error("Sign-in state expired. Please try again.");
-      } else {
-        toast.error(message);
-      }
-    }
-  };
-
-  const handleMicrosoftSignInInThisWindow = async () => {
-    if (!AZURE_CLIENT_ID) return;
-    setIsMicrosoftLoading(true);
-    try {
-      const { PublicClientApplication } = await import("@azure/msal-browser");
-      const msalConfig = {
-        auth: {
-          clientId: AZURE_CLIENT_ID,
-          authority: `https://login.microsoftonline.com/${AZURE_TENANT_ID}`,
-          redirectUri: AZURE_REDIRECT_URI,
-        },
-        cache: { cacheLocation: "sessionStorage" },
-      };
-      const msal = new PublicClientApplication(msalConfig);
-      await msal.initialize();
-      try {
-        await msal.handleRedirectPromise();
-      } catch (_) {}
-      await msal.loginRedirect({ scopes: ["User.Read", "openid", "profile"] });
-    } catch (err) {
-      setIsMicrosoftLoading(false);
-      toast.error(err instanceof Error ? err.message : "Microsoft sign-in failed");
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!validateForm()) return;
-    
+
     setIsSubmitting(true);
-    
+
     try {
       const { error, user: loggedInUser } = await signIn(formData.email, formData.password);
       if (error) {
@@ -242,7 +83,7 @@ const AuthPage = () => {
         toast.success("Welcome back!");
         navigateAfterLogin(loggedInUser ?? null);
       }
-    } catch (err) {
+    } catch {
       toast.error("An unexpected error occurred. Please try again.");
     } finally {
       setIsSubmitting(false);
@@ -289,63 +130,11 @@ const AuthPage = () => {
           </p>
         </motion.div>
 
-        {/* Microsoft Sign In */}
-        {AZURE_CLIENT_ID && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25 }}
-            className="mb-4"
-          >
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleMicrosoftSignIn}
-              disabled={isMicrosoftLoading || !msalReady}
-              className="w-full py-6 text-base font-medium rounded-xl border-2 border-[#5E5E5E] bg-white text-[#5E5E5E] hover:bg-[#F3F3F3] hover:text-[#323130]"
-            >
-              {isMicrosoftLoading ? (
-                <ConnectPlusLoader variant="button" message="Signing in..." />
-              ) : !msalReady ? (
-                <ConnectPlusLoader variant="button" message="Loading..." />
-              ) : (
-                <span className="flex items-center justify-center gap-3">
-                  <svg width="21" height="21" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg" className="shrink-0">
-                    <rect width="10" height="10" fill="#F25022" />
-                    <rect x="11" width="10" height="10" fill="#7FBA00" />
-                    <rect y="11" width="10" height="10" fill="#00A4EF" />
-                    <rect x="11" y="11" width="10" height="10" fill="#FFB900" />
-                  </svg>
-                  Sign in with Microsoft
-                </span>
-              )}
-            </Button>
-            <p className="mt-2 text-center">
-              <button
-                type="button"
-                onClick={handleMicrosoftSignInInThisWindow}
-                disabled={isMicrosoftLoading || !msalReady}
-                className="text-xs text-muted-foreground hover:text-foreground underline disabled:opacity-50"
-              >
-                Popup not showing? Open in this window
-              </button>
-            </p>
-          </motion.div>
-        )}
-
-        {AZURE_CLIENT_ID && (
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex-1 h-px bg-border" />
-            <span className="text-sm text-muted-foreground">or</span>
-            <div className="flex-1 h-px bg-border" />
-          </div>
-        )}
-
         {/* Form */}
         <motion.form
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
+          transition={{ delay: 0.25 }}
           onSubmit={handleSubmit}
           className="space-y-4 flex-1"
         >

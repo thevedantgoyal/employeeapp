@@ -11,6 +11,7 @@ import { Upload, FileText, Image, Video, FileSpreadsheet, File, Loader2, Plus, X
 import { db } from "@/integrations/api/db";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
+import { compressAndConvertImage } from "@/hooks/useProfileManagement";
 
 export interface UploadedFileInfo {
   id: string;
@@ -31,6 +32,8 @@ export interface FileUploaderProps {
   pathPrefix?: string;
   /** When true, only render input + dialog; use ref.openPicker() to open (e.g. from dropdown). */
   hideButton?: boolean;
+  /** Mobile camera/gallery hint for profile photos (avatars). */
+  capture?: "environment" | "user";
 }
 
 export interface FileUploaderRef {
@@ -68,17 +71,28 @@ export const FileUploader = forwardRef<FileUploaderRef, FileUploaderProps>(funct
   bucket = "evidence",
   pathPrefix,
   hideButton = false,
+  capture,
 }, ref) {
   const { user } = useAuth();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [compressing, setCompressing] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
 
+  const isAvatarBucket = bucket === "avatars";
   const maxBytes = maxFileSizeMB * MB;
-  const accept = allowedTypes.length > 0 ? allowedTypes.join(",") : undefined;
+  /** Raw file cap before client compression (aligned with backend multer). */
+  const rawMaxBytes = isAvatarBucket ? Math.max(maxBytes, 50 * MB) : maxBytes;
+  const accept =
+    allowedTypes.length > 0
+      ? allowedTypes.join(",")
+      : isAvatarBucket
+        ? "image/*,.heic,.heif,.avif,.jfif,.bmp,.tif,.tiff,.svg"
+        : undefined;
+  const inputCapture = capture ?? (isAvatarBucket ? "environment" : undefined);
 
   const openPicker = useCallback(() => {
     setUploadError(null);
@@ -94,9 +108,13 @@ export const FileUploader = forwardRef<FileUploaderRef, FileUploaderProps>(funct
     const files = e.target.files;
     if (!files?.length) return;
     const list = Array.from(files);
-    const tooBig = list.find((f) => f.size > maxBytes);
+    const tooBig = list.find((f) => f.size > rawMaxBytes);
     if (tooBig) {
-      toast.error(`File "${tooBig.name}" exceeds the size limit (${maxFileSizeMB}MB).`);
+      toast.error(
+        isAvatarBucket
+          ? `File "${tooBig.name}" is too large before compression (max ${(rawMaxBytes / MB).toFixed(0)}MB). Try another photo.`
+          : `File "${tooBig.name}" exceeds the size limit (${maxFileSizeMB}MB).`,
+      );
       return;
     }
     setPendingFiles((prev) => {
@@ -136,25 +154,46 @@ export const FileUploader = forwardRef<FileUploaderRef, FileUploaderProps>(funct
     const results: UploadedFileInfo[] = [];
     const total = pendingFiles.length;
     let done = 0;
+    const toastId = "file-uploader-avatar";
 
     try {
       const prefix = pathPrefix ?? `${user.id}/`;
       for (const file of pendingFiles) {
-        const ext = file.name.split(".").pop() || "";
+        let fileToUpload = file;
+        if (isAvatarBucket) {
+          setCompressing(true);
+          toast.loading("Processing your image, please wait...", { id: toastId });
+          if (file.size > 500 * 1024) {
+            toast.info("Image is too large. We're compressing it automatically...", { duration: 4000 });
+          }
+          try {
+            fileToUpload = await compressAndConvertImage(file);
+          } finally {
+            setCompressing(false);
+            toast.dismiss(toastId);
+          }
+        }
+
+        const ext = isAvatarBucket ? "jpg" : fileToUpload.name.split(".").pop() || "";
         const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
         const filePath = `${prefix}${fileName}`;
 
-        const { data, error } = await db.storage.from(bucket).upload(filePath, file);
+        const { data, error } = await db.storage.from(bucket).upload(filePath, fileToUpload);
         if (error) {
-          throw new Error(error.message || "Upload failed");
+          const raw = (error as { message?: string }).message || "";
+          const low = raw.toLowerCase();
+          if (low.includes("failed to fetch") || low.includes("network")) {
+            throw new Error("Upload failed. Please check your internet connection and try again.");
+          }
+          throw new Error(raw || "Upload failed. Please check your internet connection and try again.");
         }
         const url = data?.url ?? "";
         results.push({
           id: data?.path ?? filePath,
           url,
           name: file.name,
-          size: file.size,
-          type: file.type,
+          size: fileToUpload.size,
+          type: fileToUpload.type,
         });
         done += 1;
         setUploadProgress(Math.round((done / total) * 100));
@@ -165,14 +204,21 @@ export const FileUploader = forwardRef<FileUploaderRef, FileUploaderProps>(funct
       setPendingFiles([]);
       onUploadComplete(results);
     } catch (err) {
-      const message =
+      let message =
         err instanceof Error
           ? err.message
-          : "Upload failed. Check your connection and try again.";
+          : "Upload failed. Please check your internet connection and try again.";
+      const low = message.toLowerCase();
+      if (low.includes("failed to fetch") || low.includes("networkerror")) {
+        message = "Upload failed. Please check your internet connection and try again.";
+      }
       setUploadError(message);
+      toast.error(message);
     } finally {
       setUploading(false);
+      setCompressing(false);
       setUploadProgress(0);
+      toast.dismiss(toastId);
     }
   };
 
@@ -184,6 +230,7 @@ export const FileUploader = forwardRef<FileUploaderRef, FileUploaderProps>(funct
         className="hidden"
         multiple={multiple}
         accept={accept}
+        capture={inputCapture}
         onChange={handleInputChange}
       />
       {!hideButton && (
@@ -229,7 +276,7 @@ export const FileUploader = forwardRef<FileUploaderRef, FileUploaderProps>(funct
                         size="icon"
                         className="shrink-0 h-8 w-8"
                         onClick={() => removePending(index)}
-                        disabled={uploading}
+                        disabled={uploading || compressing}
                       >
                         <X className="w-4 h-4" />
                       </Button>
@@ -240,7 +287,7 @@ export const FileUploader = forwardRef<FileUploaderRef, FileUploaderProps>(funct
             )}
 
             {pendingFiles.length > 0 && (
-              <Button type="button" variant="outline" size="sm" className="w-full gap-2" onClick={addMore} disabled={uploading}>
+              <Button type="button" variant="outline" size="sm" className="w-full gap-2" onClick={addMore} disabled={uploading || compressing}>
                 <Plus className="w-4 h-4" />
                 Add More
               </Button>
@@ -252,7 +299,7 @@ export const FileUploader = forwardRef<FileUploaderRef, FileUploaderProps>(funct
               </div>
             )}
 
-            {uploading && (
+            {(uploading || compressing) && (
               <div className="space-y-1">
                 <div className="h-2 rounded-full bg-muted overflow-hidden">
                   <div
@@ -260,20 +307,22 @@ export const FileUploader = forwardRef<FileUploaderRef, FileUploaderProps>(funct
                     style={{ width: `${uploadProgress}%` }}
                   />
                 </div>
-                <p className="text-xs text-muted-foreground text-center">Uploading…</p>
+                <p className="text-xs text-muted-foreground text-center">
+                  {compressing ? "Processing your image, please wait…" : "Uploading…"}
+                </p>
               </div>
             )}
           </div>
           <DialogFooter className="gap-2 sm:gap-0">
-            <Button type="button" variant="outline" onClick={handleCancel} disabled={uploading}>
+            <Button type="button" variant="outline" onClick={handleCancel} disabled={uploading || compressing}>
               Cancel
             </Button>
             <Button
               type="button"
               onClick={performUpload}
-              disabled={pendingFiles.length === 0 || uploading}
+              disabled={pendingFiles.length === 0 || uploading || compressing}
             >
-              {uploading ? (
+              {uploading || compressing ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 `Upload ${pendingFiles.length} file(s)`

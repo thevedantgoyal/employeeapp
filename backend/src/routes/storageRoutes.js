@@ -5,10 +5,25 @@ import * as storageService from '../services/storageService.js';
 import { query } from '../config/database.js';
 
 const router = Router();
-const AVATAR_MAX_BYTES = 2 * 1024 * 1024; // 2MB
-const AVATAR_ALLOWED_MIMES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB max (avatars validated to 2MB in handler)
+/** Max size for a single uploaded file (multipart). */
+const UPLOAD_MAX_BYTES = 50 * 1024 * 1024; // 50MB
+/** After client compression, avatar is usually small; allow large JPEG edge cases. */
+const AVATAR_MAX_BYTES = 25 * 1024 * 1024; // 25MB
+
+function isAllowedAvatarMime(mime, originalname) {
+  const m = (mime || '').toLowerCase();
+  if (m.startsWith('image/')) return true;
+  const name = (originalname || '').toLowerCase();
+  if (/\.(jpe?g|png|gif|webp|bmp|tiff?|ico|svg|heic|heif|avif|jfif|pjpeg|pjp)$/i.test(name)) return true;
+  if (m === 'application/octet-stream' && /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(name)) return true;
+  return false;
+}
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: UPLOAD_MAX_BYTES },
+});
 
 /**
  * GET /storage/avatars/* — serve avatar image without auth (legacy URL-based avatars).
@@ -79,18 +94,41 @@ async function handleAvatarUpload(req, res) {
   return res.status(200).json({ data: { avatar_url: base64String }, error: null });
 }
 
-router.post('/upload', authenticate, upload.single('file'), async (req, res, next) => {
-  try {
+router.post(
+  '/upload',
+  authenticate,
+  (req, res, next) => {
+    upload.single('file')(req, res, (err) => {
+      if (err) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ data: null, error: { message: 'File too large (max 10MB)' } });
+        }
+        return res.status(400).json({ data: null, error: { message: err.message || 'Upload error' } });
+      }
+      next();
+    });
+  },
+  async (req, res, next) => {
+    try {
     const bucket = (req.body && req.body.bucket) || 'evidence';
     if (bucket === 'avatars') {
       if (!req.file || !req.file.buffer) {
         return res.status(400).json({ data: null, error: { message: 'No file uploaded' } });
       }
-      if (!AVATAR_ALLOWED_MIMES.includes(req.file.mimetype)) {
-        return res.status(400).json({ data: null, error: { message: 'Only images allowed (jpg, png, webp, gif)' } });
+      if (!isAllowedAvatarMime(req.file.mimetype, req.file.originalname)) {
+        return res.status(400).json({
+          data: null,
+          error: {
+            message:
+              'Invalid file type for profile photo. Use a standard image file (photos are converted automatically in the app).',
+          },
+        });
       }
       if (req.file.size > AVATAR_MAX_BYTES) {
-        return res.status(400).json({ data: null, error: { message: 'Image must be under 2MB' } });
+        return res.status(400).json({
+          data: null,
+          error: { message: 'Image file is too large after upload (max 25MB). Try a smaller photo.' },
+        });
       }
       return await handleAvatarUpload(req, res);
     }
@@ -110,9 +148,10 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res, nex
     const baseUrl = process.env.FILE_BASE_URL || `${req.protocol}://${req.get('host')}`;
     const url = `${baseUrl}/api/storage/${bucket}/${encodeURIComponent(path)}`;
     res.status(201).json({ data: { url, path: result.path }, error: null });
-  } catch (err) {
-    next(err);
-  }
-});
+    } catch (err) {
+      next(err);
+    }
+  },
+);
 
 export default router;

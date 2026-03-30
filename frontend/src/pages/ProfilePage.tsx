@@ -33,6 +33,7 @@ import {
   type ExtendedProfile,
 } from "@/hooks/useProfileManagement";
 import { toast } from "sonner";
+import { formatIndiaMobileInput, normalizeProfilePhoneForEdit, isValidIndiaMobileDisplay } from "@/lib/utils";
 import { FileUploader, type FileUploaderRef, type UploadedFileInfo } from "@/components/upload/FileUploader";
 
 const containerVariants = {
@@ -144,7 +145,7 @@ const ProfilePage = () => {
   const startEditing = () => {
     if (!profile) return;
     setEditData({
-      phone: String(profile.phone ?? ""),
+      phone: normalizeProfilePhoneForEdit(profile.phone),
       bio: String(profile.bio ?? ""),
       linkedin_url: String(profile.linkedin_url ?? ""),
       joining_date: String(profile.joining_date ?? ""),
@@ -156,6 +157,11 @@ const ProfilePage = () => {
   };
 
   const handleSave = async () => {
+    const p = editData.phone.trim();
+    if (p.startsWith("+91") && !isValidIndiaMobileDisplay(editData.phone)) {
+      toast.error("Enter a valid 10-digit Indian mobile number");
+      return;
+    }
     try {
       await updateProfile.mutateAsync(editData as Partial<ExtendedProfile>);
       setEditing(false);
@@ -284,8 +290,8 @@ const ProfilePage = () => {
               ref={avatarUploaderRef}
               hideButton
               multiple={false}
-              allowedTypes={["image/*"]}
-              maxFileSizeMB={5}
+              allowedTypes={["image/*", ".heic", ".heif", ".avif", ".jfif", ".bmp", ".tif", ".tiff", ".svg"]}
+              maxFileSizeMB={50}
               bucket="avatars"
               label="Upload profile picture"
               onUploadComplete={onAvatarUploadComplete}
@@ -359,8 +365,25 @@ const ProfilePage = () => {
             <div className="flex-1">
               <p className="text-xs text-muted-foreground">Mobile</p>
               {editing ? (
-                <Input value={editData.phone} onChange={(e) => setEditData({ ...editData, phone: e.target.value })}
-                  placeholder="Phone number" className="h-8 text-sm mt-0.5" />
+                <Input
+                  type="tel"
+                  inputMode="tel"
+                  autoComplete="tel"
+                  value={editData.phone}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    const useIndia =
+                      editData.phone.trim() === "" ||
+                      editData.phone.startsWith("+91") ||
+                      v.startsWith("+91");
+                    setEditData({
+                      ...editData,
+                      phone: useIndia ? formatIndiaMobileInput(v) : v,
+                    });
+                  }}
+                  placeholder="+91 XXXXX XXXXX"
+                  className="h-8 text-sm mt-0.5 placeholder:text-muted-foreground/60"
+                />
               ) : (
                 <p className="font-medium">{profile?.phone || "Not set"}</p>
               )}

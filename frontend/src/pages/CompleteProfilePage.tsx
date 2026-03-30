@@ -40,6 +40,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/integrations/api/client";
 import { toast } from "sonner";
 import { FileUploader, type FileUploaderRef, type UploadedFileInfo } from "@/components/upload/FileUploader";
+import {
+  IN_PHONE_PREFIX,
+  formatIndiaMobileInput,
+  isValidIndiaMobileDisplay,
+} from "@/lib/utils";
 
 const SKILL_SUGGESTIONS = [
   "JavaScript",
@@ -80,7 +85,7 @@ const CompleteProfilePage = () => {
   const [capturedFile, setCapturedFile] = useState<File | null>(null);
   const [resumeUrl, setResumeUrl] = useState<string | null>(null);
   const [resumeName, setResumeName] = useState<string | null>(null);
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(IN_PHONE_PREFIX);
   const [bio, setBio] = useState("");
   const [linkedinUrl, setLinkedinUrl] = useState("");
   const [joiningDate, setJoiningDate] = useState("");
@@ -148,6 +153,8 @@ const CompleteProfilePage = () => {
 
   const handleConfirmCapture = async () => {
     if (!capturedFile) return;
+    const prevPreview = avatarPreview;
+    const prevUrl = avatarUrl;
     if (avatarBlobUrlRef.current) {
       URL.revokeObjectURL(avatarBlobUrlRef.current);
       avatarBlobUrlRef.current = null;
@@ -157,10 +164,22 @@ const CompleteProfilePage = () => {
     setAvatarPreview(blobUrl);
     try {
       const url = await uploadAvatar(capturedFile);
-      if (url) setAvatarUrl(url);
+      if (url) {
+        setAvatarUrl(url);
+        setAvatarPreview(url);
+        if (avatarBlobUrlRef.current) {
+          URL.revokeObjectURL(avatarBlobUrlRef.current);
+          avatarBlobUrlRef.current = null;
+        }
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Upload failed");
-      setAvatarUrl(null);
+      setAvatarPreview(prevPreview);
+      setAvatarUrl(prevUrl);
+      if (avatarBlobUrlRef.current) {
+        URL.revokeObjectURL(avatarBlobUrlRef.current);
+        avatarBlobUrlRef.current = null;
+      }
     }
     if (capturedBlobUrl) URL.revokeObjectURL(capturedBlobUrl);
     setCapturedBlobUrl(null);
@@ -217,8 +236,8 @@ const CompleteProfilePage = () => {
 
   const handleSubmit = async () => {
     // Validate required fields
-    if (!phone.trim()) {
-      toast.error("Phone number is required");
+    if (!isValidIndiaMobileDisplay(phone)) {
+      toast.error("Enter a valid 10-digit Indian mobile number");
       return;
     }
     if (!bio.trim()) {
@@ -346,8 +365,8 @@ const CompleteProfilePage = () => {
             ref={avatarUploaderRef}
             hideButton
             multiple={false}
-            allowedTypes={["image/jpeg", "image/png", "image/jpg"]}
-            maxFileSizeMB={5}
+            allowedTypes={["image/*", ".heic", ".heif", ".avif", ".jfif", ".bmp", ".tif", ".tiff", ".svg"]}
+            maxFileSizeMB={50}
             bucket="avatars"
             label="Upload profile picture"
             onUploadComplete={onAvatarUploadComplete}
@@ -416,7 +435,15 @@ const CompleteProfilePage = () => {
           <Label className="text-sm font-medium flex items-center gap-1.5">
             <Phone className="w-3.5 h-3.5" /> Phone Number <span className="text-destructive">*</span>
           </Label>
-          <Input placeholder="+1 234 567 8900" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <Input
+            type="tel"
+            inputMode="tel"
+            autoComplete="tel"
+            placeholder="+91 XXXXX XXXXX"
+            value={phone}
+            onChange={(e) => setPhone(formatIndiaMobileInput(e.target.value))}
+            className="placeholder:text-muted-foreground/60"
+          />
         </motion.div>
 
         {/* Bio */}
