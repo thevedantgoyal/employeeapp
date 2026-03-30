@@ -16,6 +16,22 @@ function decodeURIComponentSafe(str) {
   }
 }
 
+function resolveSsl(parsed) {
+  const sslFlag = (process.env.DATABASE_SSL || '').trim().toLowerCase();
+  if (sslFlag === 'false' || sslFlag === '0' || sslFlag === 'disable') {
+    return false;
+  }
+  const mode = (parsed.searchParams.get('sslmode') || '').toLowerCase();
+  if (mode === 'disable') {
+    return false;
+  }
+  const host = parsed.hostname || '';
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return false;
+  }
+  return { rejectUnauthorized: false };
+}
+
 let poolConfig;
 try {
   const parsed = new URL(url);
@@ -29,7 +45,7 @@ try {
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
 
-    ssl: parsed.hostname !== 'localhost' ? { rejectUnauthorized: false } : false,
+    ssl: resolveSsl(parsed),
   };
 } catch (e) {
   throw new Error('Invalid DATABASE_URL in .env: ' + (e.message || 'parse error'));

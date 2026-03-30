@@ -17,9 +17,11 @@ import taskRoutes from './taskRoutes.js';
 import pushRoutes from './pushRoutes.js';
 import celebrationRoutes from './celebrationRoutes.js';
 import notificationRoutes from './notificationRoutes.js';
+import healthRoutes from './healthRoutes.js';
 
 const router = Router();
 
+router.use(healthRoutes);
 router.use('/auth', authRoutes);
 router.use('/tasks', taskRoutes);
 router.use('/projects', projectRoutes);

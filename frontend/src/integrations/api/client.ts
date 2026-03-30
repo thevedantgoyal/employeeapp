@@ -1,10 +1,11 @@
+import { getApiBase } from './baseUrl';
+
 /**
  * API client for ConnectPlus Node.js backend.
  * Use when VITE_USE_CUSTOM_BACKEND=true. Same response shape as Supabase: { data, error }.
  * Auth uses httpOnly cookies; no tokens stored in localStorage (XSS-safe).
  */
-
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+const BASE = getApiBase();
 
 const DEFAULT_FETCH_OPTIONS: RequestInit = { credentials: 'include' };
 

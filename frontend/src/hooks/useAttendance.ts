@@ -1,8 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { db } from "@/integrations/api/db";
+import { getApiBase } from "@/integrations/api/baseUrl";
 import { toast } from "sonner";
 import { format } from "date-fns";
+
+const ATTENDANCE_API_BASE = getApiBase();
 
 export type AttendanceStep = "disclaimer" | "face" | "location" | "confirmation";
 export type VerificationStatus = "pending" | "verifying" | "success" | "failed";
@@ -236,8 +239,7 @@ export const useAttendance = () => {
       }
 
       // Face verification: call backend if implemented, otherwise skip (not available)
-      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
-      const response = await fetch(`${apiUrl}/attendance/verify-face`, {
+      const response = await fetch(`${ATTENDANCE_API_BASE}/attendance/verify-face`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -339,7 +341,6 @@ export const useAttendance = () => {
       return;
     }
 
-    const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
     const { data: sessionData } = await db.auth.getSession();
     const token = sessionData?.session?.access_token;
     if (!token) {
@@ -347,7 +348,7 @@ export const useAttendance = () => {
       return;
     }
 
-    const response = await fetch(`${apiUrl}/attendance/check-in`, {
+    const response = await fetch(`${ATTENDANCE_API_BASE}/attendance/check-in`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
@@ -400,7 +401,6 @@ export const useAttendance = () => {
   const confirmCheckOut = useCallback(async () => {
     if (!user) return;
 
-    const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
     const { data: sessionData } = await db.auth.getSession();
     const token = sessionData?.session?.access_token;
     if (!token) {
@@ -408,7 +408,7 @@ export const useAttendance = () => {
       return;
     }
 
-    const response = await fetch(`${apiUrl}/attendance/check-out`, {
+    const response = await fetch(`${ATTENDANCE_API_BASE}/attendance/check-out`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,

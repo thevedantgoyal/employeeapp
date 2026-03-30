@@ -22,8 +22,18 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 4000;
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT);
+server.once('listening', () => {
   console.log(`ConnectPlus API listening on port ${config.port} at ${prefix}`);
+});
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `Port ${PORT} is already in use. Stop the other process (e.g. kill $(lsof -ti :${PORT})) or set PORT in backend/.env.`,
+    );
+    process.exit(1);
+  }
+  throw err;
 });
 
 export default server;

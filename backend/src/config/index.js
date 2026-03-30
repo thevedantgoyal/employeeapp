@@ -112,3 +112,23 @@ export const config = {
     tenantId: getEnv('AZURE_TENANT_ID') || 'common',
   },
 };
+
+function validateStartupEnv() {
+  const dbUrl = getEnv('DATABASE_URL') || process.env.DATABASE_URL;
+  if (!dbUrl || !String(dbUrl).trim()) {
+    console.error(
+      'FATAL: DATABASE_URL is not set. Add it to backend/.env, set PM2 cwd to the backend folder, or pass env in ecosystem.config / PM2.',
+    );
+    process.exit(1);
+  }
+  const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+  if (isProd) {
+    const jwt = getEnv('JWT_SECRET');
+    if (!jwt) {
+      console.error('FATAL: JWT_SECRET must be set in production.');
+      process.exit(1);
+    }
+  }
+}
+
+validateStartupEnv();

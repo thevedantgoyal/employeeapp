@@ -3,11 +3,12 @@
  * Replaces the previous Supabase client; same API shape for compatibility.
  */
 import { api, authApi } from "@/integrations/api/client";
+import { getApiBase } from "@/integrations/api/baseUrl";
 
 const DATA_PREFIX = "/data";
 const PROFILES_ME = "/profiles/me";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000/api";
+const API_BASE = getApiBase();
 const CREDENTIALS: RequestCredentials = "include";
 
 type QueryParams = Record<string, string | string[] | number | number[] | boolean | undefined>;
