@@ -60,15 +60,6 @@ export async function authenticate(req, res, next) {
   req.profileId = profile?.profile_id ?? null;
   req.userType = getUserTypeFromProfile(profile);
 
-  if (req.originalUrl && req.originalUrl.includes('/data/tasks')) {
-    // console.log('[auth] GET /data/tasks context:', {
-    //   userId: userIdForQueries,
-    //   profileId: req.profileId,
-    //   roles,
-    //   userType: req.userType,
-    //   hasProfile: !!profile,
-    // });
-  }
   next();
 }
 

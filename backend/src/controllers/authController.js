@@ -59,13 +59,16 @@ export async function refresh(req, res, next) {
 /**
  * GET /auth/session
  * Token from httpOnly cookie or Authorization: Bearer <access_token>
- * Response: { data: { user, profile }, error: null } or 401
+ * Response: { data: { user, profile }, error: null } on success.
+ * No access token: 200 + { data: null, error } so browsers/clients do not treat it as 401
+ * (avoids noisy refresh attempts when no refresh cookie exists).
+ * Invalid/expired token: 401 so the client can refresh and retry.
  */
 export async function getSession(req, res, next) {
   try {
     const token = getAccessTokenFromRequest(req) || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null);
     if (!token) {
-      return res.status(401).json({ data: null, error: { message: 'Not authenticated' } });
+      return res.status(200).json({ data: null, error: { message: 'Not authenticated' } });
     }
     const session = await authService.getSession(token);
     if (!session) {
