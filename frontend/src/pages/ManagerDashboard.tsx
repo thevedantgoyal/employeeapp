@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { useSearchParams } from "react-router-dom";
 import { 
   CheckCircle, XCircle, Clock, User, FileText, ExternalLink,
   Loader2, ClipboardList, CheckSquare, Folder,
@@ -29,6 +30,7 @@ type TabType = "contributions" | "tasks" | "projects";
 const ManagerDashboard = () => {
   const { user } = useAuth();
   const subadmin = isSubadmin(user);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<TabType>("contributions");
   const { data: contributions, isLoading } = usePendingContributions();
   const reviewMutation = useReviewContribution();
@@ -40,6 +42,17 @@ const ManagerDashboard = () => {
       setActiveTab("tasks");
     }
   }, [subadmin, activeTab]);
+
+  useEffect(() => {
+    const requestedTab = searchParams.get("tab");
+    if (requestedTab === "tasks") {
+      setActiveTab("tasks");
+    } else if (requestedTab === "projects" && !subadmin) {
+      setActiveTab("projects");
+    } else if (requestedTab === "contributions") {
+      setActiveTab("contributions");
+    }
+  }, [searchParams, subadmin]);
 
   const handleReview = async (id: string, status: "approved" | "rejected") => {
     try {
@@ -150,7 +163,16 @@ const ManagerDashboard = () => {
         </>
       )}
 
-      {activeTab === "tasks" && <TaskManagement />}
+      {activeTab === "tasks" && (
+        <TaskManagement
+          autoOpenCreate={searchParams.get("create") === "1"}
+          onCreateHandled={() => {
+            const next = new URLSearchParams(searchParams);
+            next.delete("create");
+            setSearchParams(next, { replace: true });
+          }}
+        />
+      )}
 
       {activeTab === "projects" && !subadmin && <ProjectManagement />}
     </>

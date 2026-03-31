@@ -39,13 +39,7 @@ router.get('/me/details', async (req, res, next) => {
   }
 });
 
-/**
- * GET /users/assignable
- * Manager standalone task: assignee list for "Separate Task". Returns managers and employees only.
- * Excludes self, subadmins, and anyone with external_sub_role set. Uses users + profiles; role from profile or user_roles.
- * Returns: id (profile id for assignment), user_id, full_name, job_title, avatar_url, employee_code, external_role.
- */
-router.get('/assignable', async (req, res, next) => {
+async function getStandaloneAssignable(req, res, next) {
   try {
     const currentUserId = req.userId;
     if (!currentUserId) {
@@ -55,11 +49,7 @@ router.get('/assignable', async (req, res, next) => {
       `SELECT
          p.id,
          u.id AS user_id,
-         COALESCE(
-           NULLIF(LOWER(TRIM(p.external_role)), ''),
-           (SELECT LOWER(ur.role::text) FROM user_roles ur WHERE ur.user_id = u.id AND ur.role IN ('manager', 'employee') LIMIT 1),
-           'employee'
-         ) AS external_role,
+         LOWER(TRIM(COALESCE(u.external_role, COALESCE(p.external_role, 'employee')))) AS external_role,
          p.full_name,
          p.job_title,
          p.avatar_url,
@@ -68,14 +58,10 @@ router.get('/assignable', async (req, res, next) => {
        FROM users u
        JOIN profiles p ON p.user_id = u.id
        WHERE u.id != $1
-         AND (
-           LOWER(TRIM(COALESCE(p.external_role, ''))) IN ('manager', 'employee')
-           OR EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.id AND ur.role IN ('manager', 'employee'))
-         )
-         AND LOWER(TRIM(COALESCE(p.external_role, ''))) != 'subadmin'
-         AND (p.external_sub_role IS NULL OR TRIM(COALESCE(p.external_sub_role, '')) = '')
+        AND LOWER(TRIM(COALESCE(p.status, ''))) != 'inactive'
+        AND LOWER(TRIM(COALESCE(u.external_role, COALESCE(p.external_role, 'employee')))) IN ('manager', 'employee')
        ORDER BY
-         CASE WHEN COALESCE(NULLIF(LOWER(TRIM(p.external_role)), ''), (SELECT LOWER(ur.role::text) FROM user_roles ur WHERE ur.user_id = u.id AND ur.role = 'manager' LIMIT 1)) = 'manager' THEN 1 ELSE 2 END,
+        CASE WHEN LOWER(TRIM(COALESCE(u.external_role, COALESCE(p.external_role, 'employee')))) = 'manager' THEN 1 ELSE 2 END,
          p.full_name ASC`,
       [currentUserId]
     );
@@ -83,7 +69,10 @@ router.get('/assignable', async (req, res, next) => {
   } catch (err) {
     next(err);
   }
-});
+}
+
+router.get('/assignable', getStandaloneAssignable);
+router.get('/assignable/standalone', getStandaloneAssignable);
 
 /**
  * GET /users/assignable/project
@@ -100,6 +89,7 @@ router.get('/assignable/project', async (req, res, next) => {
               COALESCE(LOWER(TRIM(p.external_role)), 'employee') AS external_role
        FROM profiles p
        WHERE p.user_id != $1
+         AND LOWER(TRIM(COALESCE(p.status, ''))) != 'inactive'
          AND (
            LOWER(TRIM(COALESCE(p.external_role, ''))) = 'employee'
            OR (
@@ -135,6 +125,7 @@ router.get('/assignable/all', async (req, res, next) => {
               p.external_sub_role
        FROM profiles p
        WHERE p.user_id != $1
+         AND LOWER(TRIM(COALESCE(p.status, ''))) != 'inactive'
          AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = p.user_id AND ur.role = 'admin')
        ORDER BY
          CASE

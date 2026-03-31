@@ -12,7 +12,7 @@ export async function updateProfileByUserId(userId, updates) {
   const allowed = [
     'full_name', 'job_title', 'department', 'location', 'phone',
     'avatar_url', 'status', 'work_hours', 'linkedin_url', 'bio',
-    'resume_url', 'joining_date', 'other_social_links', 'working_status',
+    'resume_url', 'date_of_birth', 'joining_date', 'other_social_links', 'working_status',
     'profile_completed', 'manager_id', 'team_id',
   ];
   const setClauses = [];

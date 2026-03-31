@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   Users,
@@ -23,9 +23,11 @@ import {
   AlertTriangle,
   Crown,
   ListTodo,
+  Loader2,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { db } from "@/integrations/api/db";
+import { api } from "@/integrations/api/client";
 import { clearAuth } from "@/integrations/api/client";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -42,6 +44,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 
 interface Employee {
   id: string;
@@ -53,7 +56,38 @@ interface Employee {
   location: string | null;
   manager_id: string | null;
   created_at: string;
+  status: string | null;
   user_roles: { role: string }[] | null;
+  external_role?: string | null;
+  assigned_task_template_ids?: string[] | null;
+}
+
+const DEPARTMENT_DISPLAY_NAMES: Record<string, string> = {
+  "Data&Ai": "Data & AI",
+  "Cybersecurity": "Cybersecurity",
+  "Security": "Cybersecurity",
+  "IT Help Desk": "IT Help Desk",
+  SCM: "Supply Chain Management (SCM)",
+  HR: "Human Resources",
+};
+function departmentLabel(dept: string): string {
+  return DEPARTMENT_DISPLAY_NAMES[dept] ?? dept;
+}
+
+function normalizeDepartmentValue(dept: string | null | undefined): string {
+  const raw = (dept || "").trim();
+  const key = raw.toLowerCase();
+  if (["data&ai", "data & ai", "data and ai", "ai"].includes(key)) return "Data&Ai";
+  if (["security", "cyber security", "cybersecurity"].includes(key)) return "Cybersecurity";
+  if (["it help desk", "it helpdesk", "it support"].includes(key)) return "IT Help Desk";
+  if (["human resource", "human resources", "hr"].includes(key)) return "HR";
+  return raw;
+}
+
+function roleLabel(role: string | null | undefined): string {
+  if (role === "subadmin") return "Senior Manager";
+  if (role === "manager") return "Manager";
+  return "Employee";
 }
 
 interface Manager {
@@ -122,6 +156,10 @@ const AdminDashboard = () => {
   const [resetConfirmText, setResetConfirmText] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
 
+  const [deptOptionsFromTemplates, setDeptOptionsFromTemplates] = useState<string[]>([]);
+  const [editModalTemplates, setEditModalTemplates] = useState<{ id: string; task_title: string }[]>([]);
+  const [loadingEditModalTemplates, setLoadingEditModalTemplates] = useState(false);
+
   const fetchEmployees = useCallback(async () => {
     try {
       const response = await db.functions.invoke("admin-manage", {
@@ -129,7 +167,10 @@ const AdminDashboard = () => {
       });
 
       if (response.error) throw response.error;
-      const emps = response.data?.employees || [];
+      const emps = ((response.data?.employees || []) as Employee[]).map((emp) => ({
+        ...emp,
+        department: normalizeDepartmentValue(emp.department),
+      }));
       setEmployees(emps);
 
       // Calculate stats
@@ -137,7 +178,7 @@ const AdminDashboard = () => {
       const departmentBreakdown: Record<string, number> = {};
 
       emps.forEach((emp: Employee) => {
-        const role = emp.user_roles?.[0]?.role || "unassigned";
+        const role = roleLabel(emp.external_role);
         roleBreakdown[role] = (roleBreakdown[role] || 0) + 1;
 
         const dept = emp.department || "Unassigned";
@@ -162,7 +203,7 @@ const AdminDashboard = () => {
       });
 
       if (response.error) throw response.error;
-      setManagers(response.data?.managers || []);
+      setManagers(((response.data as { managers?: Manager[] } | null)?.managers) || []);
     } catch (err) {
       console.error("Error fetching managers:", err);
     }
@@ -174,7 +215,7 @@ const AdminDashboard = () => {
         body: { action: "get-overview-stats" },
       });
       if (response.error) throw response.error;
-      const d = response.data as OverviewStats | undefined;
+      const d = response.data as unknown as OverviewStats | undefined;
       if (d) setOverviewStats(d);
     } catch (err) {
       console.error("Error fetching overview stats:", err);
@@ -189,6 +230,49 @@ const AdminDashboard = () => {
     };
     loadData();
   }, [fetchEmployees, fetchManagers, fetchOverviewStats]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get<string[]>("/tasks/departments").then(({ data, error }) => {
+      if (cancelled || error || !data) return;
+      setDeptOptionsFromTemplates([...new Set(data.map((d) => normalizeDepartmentValue(d)))]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const d = normalizeDepartmentValue(editingEmployee?.department);
+    if (!editingEmployee || !d) {
+      setEditModalTemplates([]);
+      setLoadingEditModalTemplates(false);
+      return;
+    }
+    let cancelled = false;
+    setLoadingEditModalTemplates(true);
+    api
+      .get<{ id: string; task_title: string }[]>(`/tasks/templates/${encodeURIComponent(d)}`)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        setLoadingEditModalTemplates(false);
+        if (error || !data) {
+          setEditModalTemplates([]);
+          return;
+        }
+        setEditModalTemplates(data);
+        setEditingEmployee((prev) => {
+          if (!prev) return prev;
+          const ids = prev.assigned_task_template_ids || [];
+          const filtered = ids.filter((id) => data.some((t) => t.id === id));
+          if (filtered.length === ids.length) return prev;
+          return { ...prev, assigned_task_template_ids: filtered };
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingEmployee?.id, editingEmployee?.department]);
 
   // API Import: fetch external URL (proxy via backend)
   const handleResetDatabase = async () => {
@@ -237,7 +321,7 @@ const AdminDashboard = () => {
     }
   };
 
-  const roles = ["employee", "team_lead", "manager", "hr", "admin", "organization"];
+  const roles = ["Senior Manager", "Manager", "Employee"];
 
   // Filter employees
   const filteredEmployees = employees.filter((emp) => {
@@ -246,7 +330,7 @@ const AdminDashboard = () => {
       emp.full_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       emp.email.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesRole = !filterRole || emp.user_roles?.[0]?.role === filterRole;
+    const matchesRole = !filterRole || roleLabel(emp.external_role) === filterRole;
 
     const matchesDept = !filterDepartment || emp.department === filterDepartment;
 
@@ -254,6 +338,14 @@ const AdminDashboard = () => {
   });
 
   const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))] as string[];
+
+  const editModalDeptOptions = useMemo(() => {
+    const d = normalizeDepartmentValue(editingEmployee?.department);
+    if (d && !deptOptionsFromTemplates.includes(d)) {
+      return [...deptOptionsFromTemplates, d].sort();
+    }
+    return deptOptionsFromTemplates;
+  }, [deptOptionsFromTemplates, editingEmployee?.department]);
 
   const tabs: { id: TabType; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: "overview", label: "Overview", icon: BarChart3 },
@@ -488,11 +580,18 @@ const AdminDashboard = () => {
                               {emp.location}
                             </span>
                           )}
-                          {emp.user_roles?.[0]?.role && (
-                            <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium capitalize">
-                              {emp.user_roles[0].role}
-                            </span>
-                          )}
+                          <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
+                            {roleLabel(emp.external_role)}
+                          </span>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                              String(emp.status || "active").toLowerCase() === "inactive"
+                                ? "bg-red-100 text-red-700"
+                                : "bg-emerald-100 text-emerald-700"
+                            }`}
+                          >
+                            {String(emp.status || "active").toLowerCase() === "inactive" ? "Inactive" : "Active"}
+                          </span>
                         </div>
                       </div>
                       <button
@@ -716,13 +815,66 @@ const AdminDashboard = () => {
                 </div>
                 <div>
                   <label className="text-sm text-muted-foreground">Department</label>
-                  <input
-                    type="text"
+                  <select
                     value={editingEmployee.department || ""}
-                    onChange={(e) => setEditingEmployee({ ...editingEmployee, department: e.target.value })}
+                    onChange={(e) =>
+                      setEditingEmployee({
+                        ...editingEmployee,
+                        department: e.target.value || null,
+                        assigned_task_template_ids: [],
+                      })
+                    }
                     className="w-full p-3 rounded-xl border border-border bg-background mt-1 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  />
+                  >
+                    <option value="">Select department</option>
+                    {editModalDeptOptions.map((d) => (
+                      <option key={d} value={d}>
+                        {departmentLabel(d)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
+                {editingEmployee.department?.trim() ? (
+                  <div>
+                    <label className="text-sm text-muted-foreground">Allowed task templates</label>
+                    {loadingEditModalTemplates ? (
+                      <div className="flex items-center gap-2 mt-2 text-sm text-muted-foreground">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Loading…
+                      </div>
+                    ) : editModalTemplates.length === 0 ? (
+                      <p className="text-sm text-muted-foreground mt-2 p-2 border rounded-xl">
+                        No templates for this department.
+                      </p>
+                    ) : (
+                      <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-border divide-y divide-border">
+                        {editModalTemplates.map((t) => (
+                          <label
+                            key={t.id}
+                            className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40"
+                          >
+                            <Checkbox
+                              checked={(editingEmployee.assigned_task_template_ids || []).includes(t.id)}
+                              onCheckedChange={(checked) => {
+                                const cur = editingEmployee.assigned_task_template_ids || [];
+                                setEditingEmployee({
+                                  ...editingEmployee,
+                                  assigned_task_template_ids: checked
+                                    ? [...cur, t.id]
+                                    : cur.filter((x) => x !== t.id),
+                                });
+                              }}
+                            />
+                            <span className="text-sm">{t.task_title}</span>
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground mt-1">
+                      None selected = all templates allowed for this department.
+                    </p>
+                  </div>
+                ) : null}
                 <div>
                   <label className="text-sm text-muted-foreground">Location</label>
                   <input
@@ -761,6 +913,7 @@ const AdminDashboard = () => {
                       department: editingEmployee.department,
                       location: editingEmployee.location,
                       manager_id: editingEmployee.manager_id,
+                      assigned_task_template_ids: editingEmployee.assigned_task_template_ids || [],
                     })
                   }
                   className="flex-1"

@@ -95,17 +95,19 @@ const templates = [
   { department: 'Data&Ai', task_title: 'Research & Experimentation', required_job_titles: ['Data Scientist', 'GenAI Developer', 'AI Engineer'] },
   { department: 'Data&Ai', task_title: 'Code Review', required_job_titles: ['App Developer', 'GenAI Developer', 'IT Trainee'] },
 
-  // SECURITY
-  { department: 'Security', task_title: 'Vulnerability Assessment', required_job_titles: ['Security Analyst', 'Cyber Security Engineer', 'Penetration Tester'] },
-  { department: 'Security', task_title: 'Penetration Testing', required_job_titles: ['Penetration Tester', 'Cyber Security Engineer', 'Security Analyst'] },
-  { department: 'Security', task_title: 'Security Incident Response', required_job_titles: ['Security Analyst', 'Cyber Security Engineer', 'SOC Analyst'] },
-  { department: 'Security', task_title: 'Firewall Rule Review', required_job_titles: ['Security Analyst', 'Network Security Engineer', 'Cyber Security Engineer'] },
-  { department: 'Security', task_title: 'Security Awareness Training', required_job_titles: ['Security Analyst', 'Cyber Security Engineer'] },
-  { department: 'Security', task_title: 'Access Control Audit', required_job_titles: ['Security Analyst', 'Cyber Security Engineer', 'SOC Analyst'] },
-  { department: 'Security', task_title: 'SIEM Log Analysis', required_job_titles: ['SOC Analyst', 'Security Analyst'] },
-  { department: 'Security', task_title: 'Compliance Audit', required_job_titles: ['Cyber Security Engineer', 'Security Analyst', 'Compliance Officer'] },
-  { department: 'Security', task_title: 'Security Policy Update', required_job_titles: ['Cyber Security Engineer', 'Security Manager'] },
-  { department: 'Security', task_title: 'Endpoint Security Review', required_job_titles: ['Security Analyst', 'SOC Analyst', 'Cyber Security Engineer'] },
+  // CYBERSECURITY
+  { department: 'Cybersecurity', task_title: 'Vulnerability Assessment', required_job_titles: ['Security Analyst', 'Cyber Security Engineer', 'Cyber Security Associate', 'Penetration Tester'] },
+  { department: 'Cybersecurity', task_title: 'Penetration Testing', required_job_titles: ['Penetration Tester', 'Cyber Security Engineer', 'Cyber Security Associate', 'Security Analyst'] },
+  { department: 'Cybersecurity', task_title: 'Security Incident Response', required_job_titles: ['Security Analyst', 'Cyber Security Engineer', 'Cyber Security Associate', 'SOC Analyst'] },
+  { department: 'Cybersecurity', task_title: 'Firewall Rule Review', required_job_titles: ['Security Analyst', 'Network Security Engineer', 'Cyber Security Engineer'] },
+  { department: 'Cybersecurity', task_title: 'Security Awareness Training', required_job_titles: ['Security Analyst', 'Cyber Security Engineer', 'Cyber Security Associate'] },
+  { department: 'Cybersecurity', task_title: 'Access Control Audit', required_job_titles: ['Security Analyst', 'Cyber Security Engineer', 'Cyber Security Associate', 'SOC Analyst'] },
+  { department: 'Cybersecurity', task_title: 'SIEM Log Analysis', required_job_titles: ['SOC Analyst', 'Security Analyst', 'Cyber Security Associate'] },
+  { department: 'Cybersecurity', task_title: 'Compliance Audit', required_job_titles: ['Cyber Security Engineer', 'Security Analyst', 'Compliance Officer', 'GRC Analyst'] },
+  { department: 'Cybersecurity', task_title: 'Security Policy Update', required_job_titles: ['Cyber Security Engineer', 'Security Manager', 'GRC Analyst'] },
+  { department: 'Cybersecurity', task_title: 'Endpoint Security Review', required_job_titles: ['Security Analyst', 'SOC Analyst', 'Cyber Security Engineer', 'Cyber Security Associate'] },
+  { department: 'Cybersecurity', task_title: 'Threat Hunting Review', required_job_titles: ['SOC Analyst', 'Cyber Security Engineer', 'Cyber Security Associate'] },
+  { department: 'Cybersecurity', task_title: 'Phishing Simulation Follow-up', required_job_titles: ['Cyber Security Associate', 'Security Analyst', 'Security Manager'] },
 
   // NETWORKING
   { department: 'Networking', task_title: 'Network Configuration', required_job_titles: ['Network Engineer', 'Network Administrator', 'IT Trainee'] },

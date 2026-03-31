@@ -51,6 +51,7 @@ CREATE TABLE public.profiles (
   team_id UUID,
   bio TEXT,
   resume_url TEXT,
+  date_of_birth DATE,
   joining_date DATE,
   other_social_links JSONB DEFAULT '{}',
   working_status TEXT NOT NULL DEFAULT 'available',

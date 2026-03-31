@@ -26,6 +26,7 @@ import {
 import { db } from "@/integrations/api/db";
 import { api } from "@/integrations/api/client";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { z } from "zod";
 
@@ -40,8 +41,33 @@ interface EmployeeDetail {
   manager_id: string | null;
   manager_name: string | null;
   created_at: string;
+  status: string | null;
   working_status: string;
   user_roles: { role: string }[];
+  external_role?: string | null;
+  assigned_task_template_ids?: string[] | null;
+}
+
+const DEPARTMENT_DISPLAY_NAMES: Record<string, string> = {
+  "Data&Ai": "Data & AI",
+  "Cybersecurity": "Cybersecurity",
+  "Security": "Cybersecurity",
+  "IT Help Desk": "IT Help Desk",
+  SCM: "Supply Chain Management (SCM)",
+  HR: "Human Resources",
+};
+function departmentLabel(dept: string): string {
+  return DEPARTMENT_DISPLAY_NAMES[dept] ?? dept;
+}
+
+function normalizeDepartmentValue(dept: string | null | undefined): string {
+  const raw = (dept || "").trim();
+  const key = raw.toLowerCase();
+  if (["data&ai", "data & ai", "data and ai", "ai"].includes(key)) return "Data&Ai";
+  if (["security", "cyber security", "cybersecurity"].includes(key)) return "Cybersecurity";
+  if (["it help desk", "it helpdesk", "it support"].includes(key)) return "IT Help Desk";
+  if (["human resource", "human resources", "hr"].includes(key)) return "HR";
+  return raw;
 }
 
 interface Manager {
@@ -88,7 +114,22 @@ const passwordSchema = z
   .regex(/[A-Z]/, "Must contain at least one uppercase letter")
   .regex(/[0-9]/, "Must contain at least one number");
 
-const roles = ["employee", "team_lead", "manager", "hr", "admin"];
+const ROLE_OPTIONS = [
+  { value: "subadmin", label: "Senior Manager" },
+  { value: "manager", label: "Manager" },
+  { value: "employee", label: "Employee" },
+] as const;
+
+const EMPLOYMENT_STATUS_OPTIONS = [
+  { value: "active", label: "Active" },
+  { value: "inactive", label: "Inactive" },
+] as const;
+
+function roleLabel(role: string | null | undefined): string {
+  if (role === "subadmin") return "Senior Manager";
+  if (role === "manager") return "Manager";
+  return "Employee";
+}
 
 type DetailTab = "details" | "workStats" | "projects";
 
@@ -117,6 +158,11 @@ const AdminEmployeeDetailPage = () => {
   const [editLocation, setEditLocation] = useState("");
   const [editManagerId, setEditManagerId] = useState("");
   const [editRole, setEditRole] = useState("");
+  const [editEmploymentStatus, setEditEmploymentStatus] = useState("active");
+  const [deptOptions, setDeptOptions] = useState<string[]>([]);
+  const [deptTemplates, setDeptTemplates] = useState<{ id: string; task_title: string }[]>([]);
+  const [loadingDeptTemplates, setLoadingDeptTemplates] = useState(false);
+  const [editTemplateIds, setEditTemplateIds] = useState<string[]>([]);
 
   // Password reset
   const [showPasswordReset, setShowPasswordReset] = useState(false);
@@ -139,10 +185,13 @@ const AdminEmployeeDetailPage = () => {
       if (emp) {
         setEmployee(emp);
         setEditJobTitle(emp.job_title || "");
-        setEditDepartment(emp.department || "");
+        setEditDepartment(normalizeDepartmentValue(emp.department));
         setEditLocation(emp.location || "");
         setEditManagerId(emp.manager_id || "");
-        setEditRole(emp.user_roles?.[0]?.role || "employee");
+        setEditRole((emp.external_role || "employee").toLowerCase());
+        setEditEmploymentStatus((emp.status || "active").toLowerCase() === "inactive" ? "inactive" : "active");
+        const tid = emp.assigned_task_template_ids;
+        setEditTemplateIds(Array.isArray(tid) ? [...tid] : []);
         const res = await db.functions.invoke("admin-manage", {
           body: { action: "get-assignable-managers", exclude_profile_id: emp.id },
         });
@@ -209,6 +258,42 @@ const AdminEmployeeDetailPage = () => {
   }, [fetchEmployee, fetchManagers]);
 
   useEffect(() => {
+    let cancelled = false;
+    api.get<string[]>("/tasks/departments").then(({ data, error }) => {
+      if (cancelled || error || !data) return;
+      setDeptOptions([...new Set(data.map((d) => normalizeDepartmentValue(d)))]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const d = normalizeDepartmentValue(editDepartment);
+    if (!d) {
+      setDeptTemplates([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingDeptTemplates(true);
+    api
+      .get<{ id: string; task_title: string }[]>(`/tasks/templates/${encodeURIComponent(d)}`)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        setLoadingDeptTemplates(false);
+        if (error || !data) {
+          setDeptTemplates([]);
+          return;
+        }
+        setDeptTemplates(data);
+        setEditTemplateIds((prev) => prev.filter((id) => data.some((t) => t.id === id)));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editDepartment]);
+
+  useEffect(() => {
     if (activeTab === "workStats" && employee?.user_id) fetchWorkStats(employee.user_id);
   }, [activeTab, employee?.user_id, fetchWorkStats]);
 
@@ -230,13 +315,15 @@ const AdminEmployeeDetailPage = () => {
             department: editDepartment || null,
             location: editLocation || null,
             manager_id: editManagerId || null,
+            status: editEmploymentStatus,
+            assigned_task_template_ids: editTemplateIds,
           },
         },
       });
       if (response.error) throw response.error;
 
       // Update role if changed
-      const currentRole = employee.user_roles?.[0]?.role;
+      const currentRole = (employee.external_role || "employee").toLowerCase();
       if (editRole !== currentRole) {
         const roleResponse = await db.functions.invoke("admin-manage", {
           body: {
@@ -292,7 +379,15 @@ const AdminEmployeeDetailPage = () => {
     }
   };
 
-  const showManagerSelect = editRole === "employee" || editRole === "team_lead" || editRole === "hr" || editRole === "manager";
+  const showManagerSelect = editRole === "employee" || editRole === "manager";
+
+  const deptSelectOptions = useMemo(() => {
+    const normalizedCurrent = normalizeDepartmentValue(editDepartment);
+    if (normalizedCurrent && !deptOptions.includes(normalizedCurrent)) {
+      return [...deptOptions, normalizedCurrent].sort();
+    }
+    return deptOptions;
+  }, [deptOptions, editDepartment]);
 
   const groupedAssignableManagers = useMemo(() => {
     const er = (m: AssignableManager) => (m.external_role || "").toString().trim().toLowerCase();
@@ -348,8 +443,8 @@ const AdminEmployeeDetailPage = () => {
           <h1 className="text-xl font-bold">{employee.full_name}</h1>
           <p className="text-sm text-muted-foreground">{employee.email}</p>
         </div>
-        <span className="px-3 py-1 text-xs font-medium bg-primary/10 text-primary rounded-full capitalize">
-          {employee.user_roles?.[0]?.role || "employee"}
+        <span className="px-3 py-1 text-xs font-medium bg-primary/10 text-primary rounded-full">
+          {roleLabel(employee.external_role)}
         </span>
       </div>
 
@@ -434,18 +529,69 @@ const AdminEmployeeDetailPage = () => {
             />
           </div>
 
-          <div className="space-y-1">
+          <div className="space-y-1 sm:col-span-2">
             <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
               <Building2 className="w-3.5 h-3.5" /> Department
             </label>
-            <input
-              type="text"
+            <select
               value={editDepartment}
-              onChange={(e) => setEditDepartment(e.target.value)}
-              placeholder="Enter department"
+              onChange={(e) => {
+                setEditDepartment(e.target.value);
+                setEditTemplateIds([]);
+              }}
               className="w-full p-3 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-            />
+            >
+              <option value="">Select department</option>
+              {deptSelectOptions.map((d) => (
+                <option key={d} value={d}>
+                  {departmentLabel(d)}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground mt-1">
+              Departments match task templates (e.g. seeded in dept_task_templates).
+            </p>
           </div>
+
+          {editDepartment.trim() ? (
+            <div className="space-y-1 sm:col-span-2">
+              <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                <ListTodo className="w-3.5 h-3.5" /> Allowed task templates
+              </label>
+              {loadingDeptTemplates ? (
+                <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Loading templates…
+                </div>
+              ) : deptTemplates.length === 0 ? (
+                <p className="text-sm text-muted-foreground p-3 rounded-xl border border-border">
+                  No templates for this department. Add rows in Task Templates or seed dept_task_templates.
+                </p>
+              ) : (
+                <div className="rounded-xl border border-border divide-y divide-border max-h-48 overflow-y-auto">
+                  {deptTemplates.map((t) => (
+                    <label
+                      key={t.id}
+                      className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/40"
+                    >
+                      <Checkbox
+                        checked={editTemplateIds.includes(t.id)}
+                        onCheckedChange={(checked) => {
+                          setEditTemplateIds((prev) =>
+                            checked ? [...prev, t.id] : prev.filter((x) => x !== t.id)
+                          );
+                        }}
+                      />
+                      <span className="text-sm">{t.task_title}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                Leave none selected to allow all templates for this department when creating tasks.
+              </p>
+            </div>
+          ) : null}
 
           <div className="space-y-1">
             <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
@@ -468,19 +614,38 @@ const AdminEmployeeDetailPage = () => {
               value={editRole}
               onChange={(e) => {
                 setEditRole(e.target.value);
-                // Clear manager if role is manager/admin
-                if (["manager", "admin"].includes(e.target.value)) {
+                if (e.target.value === "subadmin") {
                   setEditManagerId("");
                 }
               }}
-              className="w-full p-3 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 capitalize"
+              className="w-full p-3 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
             >
-              {roles.map((r) => (
-                <option key={r} value={r} className="capitalize">
-                  {r.replace("_", " ")}
+              {ROLE_OPTIONS.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              <User className="w-3.5 h-3.5" /> Assignment Status
+            </label>
+            <select
+              value={editEmploymentStatus}
+              onChange={(e) => setEditEmploymentStatus(e.target.value)}
+              className="w-full p-3 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              {EMPLOYMENT_STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">
+              Inactive users will not appear in task assignee lists during creation or allocation.
+            </p>
           </div>
 
           {showManagerSelect && (
@@ -635,9 +800,9 @@ const AdminEmployeeDetailPage = () => {
                   </>
                 )}
               </div>
-              {editRole === "manager" && (
+              {editRole === "subadmin" && (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Leave empty if this manager has no reporting manager (e.g. CEO, CTO, Director).
+                  Senior Managers should normally have no reporting manager.
                 </p>
               )}
             </div>

@@ -33,9 +33,9 @@ function signRefreshToken(userId) {
 
 function getUserTypeFromProfile(profile) {
   const externalRole = (profile?.external_role || '').toString().trim().toLowerCase();
-  const hasManager = !!profile?.manager_id;
-  if (externalRole === 'subadmin' && !hasManager) return 'SENIOR_MANAGER';
-  if (externalRole === 'manager' && hasManager) return 'MANAGER';
+  const hasSubRole = profile?.external_sub_role != null && String(profile.external_sub_role).trim() !== '';
+  if (externalRole === 'subadmin' || hasSubRole) return 'SENIOR_MANAGER';
+  if (externalRole === 'manager' && !hasSubRole) return 'MANAGER';
   return 'EMPLOYEE';
 }
 

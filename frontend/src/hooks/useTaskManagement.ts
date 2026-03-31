@@ -112,14 +112,14 @@ export const useTeamMembers = () => {
   });
 };
 
-/** Manager standalone task: direct reports + peer managers. Excludes self, subadmins. */
+/** Manager standalone task: all managers + employees. Excludes self and senior managers. */
 export const useAssignableUsers = () => {
   const { user } = useAuth();
   return useQuery({
     queryKey: ["assignable-users", user?.id],
     queryFn: async (): Promise<AssignableUser[]> => {
       if (!user) return [];
-      const { data, error } = await api.get<AssignableUser[]>("/users/assignable");
+      const { data, error } = await api.get<AssignableUser[]>("/users/assignable/standalone");
       if (error) throw new Error(error.message);
       return data ?? [];
     },

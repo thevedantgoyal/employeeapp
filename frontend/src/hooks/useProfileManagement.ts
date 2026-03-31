@@ -160,6 +160,7 @@ export interface ExtendedProfile {
   linkedin_url: string | null;
   bio: string | null;
   resume_url: string | null;
+  date_of_birth: string | null;
   joining_date: string | null;
   other_social_links: Record<string, string> | null;
   working_status: string;
@@ -225,6 +226,7 @@ export const useCompleteProfile = () => {
       phone?: string;
       bio?: string;
       linkedin_url?: string;
+      date_of_birth?: string;
       joining_date?: string;
       other_social_links?: Record<string, string>;
       avatar_url?: string;
@@ -237,6 +239,7 @@ export const useCompleteProfile = () => {
       if (profileData.phone) updatePayload.phone = profileData.phone;
       if (profileData.bio) updatePayload.bio = profileData.bio;
       if (profileData.linkedin_url) updatePayload.linkedin_url = profileData.linkedin_url;
+      if (profileData.date_of_birth) updatePayload.date_of_birth = profileData.date_of_birth;
       if (profileData.joining_date) updatePayload.joining_date = profileData.joining_date;
       if (profileData.avatar_url) updatePayload.avatar_url = profileData.avatar_url;
       if (profileData.resume_url) updatePayload.resume_url = profileData.resume_url;

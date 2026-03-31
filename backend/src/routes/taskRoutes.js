@@ -20,6 +20,41 @@ function parseDurationHours(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function normalizeDepartmentName(department) {
+  const raw = String(department || '').trim();
+  if (!raw) return raw;
+  if (['data&ai', 'data & ai', 'data and ai', 'ai'].includes(raw.toLowerCase())) {
+    return 'Data&Ai';
+  }
+  if (['it help desk', 'it helpdesk', 'it support'].includes(raw.toLowerCase())) {
+    return 'IT Help Desk';
+  }
+  if (['hr', 'human resource', 'human resources'].includes(raw.toLowerCase())) {
+    return 'HR';
+  }
+  if (['security', 'cybersecurity', 'cyber security'].includes(raw.toLowerCase())) {
+    return 'Cybersecurity';
+  }
+  return raw;
+}
+
+function getDepartmentAliases(department) {
+  const normalized = normalizeDepartmentName(department);
+  if (normalized === 'Data&Ai') {
+    return ['Data&Ai', 'Data & AI', 'Data and AI', 'AI'];
+  }
+  if (normalized === 'IT Help Desk') {
+    return ['IT Help Desk', 'IT Helpdesk', 'IT Support'];
+  }
+  if (normalized === 'HR') {
+    return ['HR', 'Human Resource', 'Human Resources'];
+  }
+  if (normalized === 'Cybersecurity') {
+    return ['Cybersecurity', 'Cyber Security', 'Security'];
+  }
+  return [normalized];
+}
+
 /**
  * GET /tasks/departments
  * Returns distinct departments from dept_task_templates (all template departments).
@@ -31,7 +66,7 @@ router.get('/departments', async (req, res, next) => {
        WHERE is_active = true
        ORDER BY department ASC`
     );
-    const list = rows.map((r) => r.department);
+    const list = [...new Set(rows.map((r) => normalizeDepartmentName(r.department)))].sort((a, b) => a.localeCompare(b));
     res.json({ data: list, error: null });
   } catch (err) {
     next(err);
@@ -48,12 +83,13 @@ router.get('/templates/:department', async (req, res, next) => {
     if (!department) {
       return res.status(400).json({ data: null, error: { message: 'Department required' } });
     }
+    const aliases = getDepartmentAliases(department);
     const { rows } = await query(
       `SELECT id, task_title, description_hint, required_job_titles
        FROM dept_task_templates
-       WHERE department = $1 AND is_active = true
+       WHERE department = ANY($1::text[]) AND is_active = true
        ORDER BY task_title ASC`,
-      [department]
+      [aliases]
     );
     res.json({
       data: rows.map((r) => ({
@@ -342,13 +378,13 @@ const DEPT_MAPPING = {
   HR: ['HR', 'Human Resource', 'Human Resources'],
   'Data&Ai': ['Data&Ai', 'Data & AI', 'Data and AI', 'AI'],
   'IT Help Desk': ['IT Help Desk', 'IT Helpdesk', 'IT Support'],
+  Cybersecurity: ['Cybersecurity', 'Cyber Security', 'Security'],
   Organization: ['Organization', 'Operations'],
 };
 
 /**
- * GET /tasks/assignees?department=X&jobTitles=Y,Z
- * Returns employees in department, optionally filtered by job_titles, grouped by job_title.
- * Uses department mapping so template names (e.g. HR, Data&Ai) match profile.department values.
+ * GET /tasks/assignees?department=X&jobTitles=Y,Z&isCustom=true|false
+ * Senior-manager dept task assignees grouped by external_role.
  */
 router.get('/assignees', async (req, res, next) => {
   try {
@@ -360,6 +396,7 @@ router.get('/assignees', async (req, res, next) => {
     let jobTitles = req.query.jobTitles;
     if (typeof jobTitles === 'string') jobTitles = jobTitles ? jobTitles.split(',').map((s) => s.trim()).filter(Boolean) : null;
     if (Array.isArray(jobTitles)) jobTitles = jobTitles.map((s) => String(s).trim()).filter(Boolean);
+    const isCustom = String(req.query.isCustom || 'false').trim().toLowerCase() === 'true';
     const taskTitle = (req.query.taskTitle || '').toString().trim();
     const currentUserId = normalizeUUID(req.userId);
 
@@ -377,15 +414,17 @@ router.get('/assignees', async (req, res, next) => {
          p.avatar_url,
          p.employee_code,
          p.department,
+         LOWER(TRIM(COALESCE(u.external_role, COALESCE(p.external_role, 'employee')))) AS external_role,
+         COALESCE(p.assigned_task_template_ids, '{}') AS assigned_task_template_ids,
          COALESCE((
            SELECT SUM(COALESCE(tsm.weight, 1.0) * (COALESCE(s.proficiency_level, 0)::numeric / 100.0))
            FROM skills s
            JOIN task_skill_mappings tsm
              ON LOWER(TRIM(tsm.skill_name)) = LOWER(TRIM(s.name))
            WHERE s.user_id = p.user_id
-             AND $4::text IS NOT NULL
+             AND $5::text IS NOT NULL
              AND LOWER(TRIM(tsm.department)) = LOWER(TRIM($1::text))
-             AND LOWER(TRIM(tsm.task_title)) = LOWER(TRIM($4::text))
+             AND LOWER(TRIM(tsm.task_title)) = LOWER(TRIM($5::text))
          ), 0)::numeric(8,3) AS fit_score,
          COALESCE((
            SELECT COUNT(*)
@@ -393,18 +432,32 @@ router.get('/assignees', async (req, res, next) => {
            JOIN task_skill_mappings tsm
              ON LOWER(TRIM(tsm.skill_name)) = LOWER(TRIM(s.name))
            WHERE s.user_id = p.user_id
-             AND $4::text IS NOT NULL
+             AND $5::text IS NOT NULL
              AND LOWER(TRIM(tsm.department)) = LOWER(TRIM($1::text))
-             AND LOWER(TRIM(tsm.task_title)) = LOWER(TRIM($4::text))
+             AND LOWER(TRIM(tsm.task_title)) = LOWER(TRIM($5::text))
          ), 0)::int AS matched_skills
        FROM profiles p
        JOIN users u ON u.id = p.user_id
        WHERE p.department = ANY($1::text[])
-       AND LOWER(TRIM(COALESCE(u.external_role, ''))) = 'employee'
+       AND LOWER(TRIM(COALESCE(p.status, ''))) != 'inactive'
+       AND LOWER(TRIM(COALESCE(u.external_role, COALESCE(p.external_role, 'employee')))) IN ('employee', 'manager', 'subadmin')
        AND u.id != $2
-       AND ($3::text[] IS NULL OR p.job_title = ANY($3::text[]))
-       ORDER BY fit_score DESC, matched_skills DESC, p.job_title ASC NULLS LAST, p.full_name ASC`,
-      [mappedDepts, currentUserId, jobTitles && jobTitles.length ? jobTitles : null, taskTitle || null]
+       AND (
+         $3::boolean = true
+         OR LOWER(TRIM(COALESCE(u.external_role, COALESCE(p.external_role, 'employee')))) IN ('manager', 'subadmin')
+         OR $4::text[] IS NULL
+         OR p.job_title = ANY($4::text[])
+       )
+       ORDER BY
+         CASE LOWER(TRIM(COALESCE(u.external_role, COALESCE(p.external_role, 'employee'))))
+           WHEN 'subadmin' THEN 1
+           WHEN 'manager' THEN 2
+           ELSE 3
+         END,
+         fit_score DESC,
+         matched_skills DESC,
+         p.full_name ASC`,
+      [mappedDepts, currentUserId, isCustom, jobTitles && jobTitles.length ? jobTitles : null, taskTitle || null]
     );
 
     if (process.env.NODE_ENV === 'development') {
@@ -413,9 +466,14 @@ router.get('/assignees', async (req, res, next) => {
 
     const grouped = {};
     for (const r of rows) {
-      const jt = r.job_title || 'Other';
-      if (!grouped[jt]) grouped[jt] = [];
-      grouped[jt].push({
+      const key =
+        r.external_role === 'subadmin'
+          ? 'Senior Manager'
+          : r.external_role === 'manager'
+            ? 'Manager'
+            : 'Employee';
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push({
         id: r.id,
         user_id: r.user_id,
         full_name: r.full_name,
@@ -423,6 +481,10 @@ router.get('/assignees', async (req, res, next) => {
         avatar_url: r.avatar_url,
         employee_code: r.employee_code,
         department: r.department,
+        external_role: r.external_role,
+        assigned_task_template_ids: Array.isArray(r.assigned_task_template_ids)
+          ? r.assigned_task_template_ids
+          : [],
         fit_score: r.fit_score != null ? Number(r.fit_score) : 0,
         matched_skills: r.matched_skills != null ? Number(r.matched_skills) : 0,
         fit_label:

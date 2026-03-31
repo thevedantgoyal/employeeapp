@@ -22,7 +22,7 @@ router.post('/subscribe', authenticate, async (req, res) => {
     await query(
       `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, user_agent)
        VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (endpoint)
+       ON CONFLICT (user_id, endpoint)
        DO UPDATE SET
          user_id = EXCLUDED.user_id,
          p256dh = EXCLUDED.p256dh,

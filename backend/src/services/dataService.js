@@ -28,15 +28,15 @@ export async function buildAccessFilter(tableName, userId, profileId, roles, fil
     }
   }
 
-  // Compute userType from profile.external_role + manager_id when available.
+  // Compute userType from profile.external_role + external_sub_role.
   if (cleanProfileId && (tableName === 'profiles' || tableName === 'tasks')) {
     try {
       const { rows } = await query('SELECT external_role, external_sub_role, manager_id FROM profiles WHERE id = $1', [cleanProfileId]);
       const p = rows[0] || null;
       const externalRole = (p?.external_role || '').toString().trim().toLowerCase();
-      const hasManager = !!p?.manager_id;
-      if (externalRole === 'subadmin' && !hasManager) userType = 'SENIOR_MANAGER';
-      else if (externalRole === 'manager' && hasManager) userType = 'MANAGER';
+      const hasSubRole = p?.external_sub_role != null && String(p.external_sub_role).trim() !== '';
+      if (externalRole === 'subadmin' || hasSubRole) userType = 'SENIOR_MANAGER';
+      else if (externalRole === 'manager' && !hasSubRole) userType = 'MANAGER';
       else userType = 'EMPLOYEE';
     } catch (_) {
       userType = null;

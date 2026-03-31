@@ -3,8 +3,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { db } from "@/integrations/api/db";
 import { api, authApi } from "@/integrations/api/client";
 
-const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
-
 interface PushNotificationState {
   isSupported: boolean;
   isSubscribed: boolean;
@@ -56,8 +54,8 @@ export const usePushNotifications = () => {
 
   // Subscribe to push notifications
   const subscribe = useCallback(async () => {
-    if (!user || !VAPID_PUBLIC_KEY) {
-      console.error("Cannot subscribe: missing user or VAPID key");
+    if (!user) {
+      console.error("Cannot subscribe: missing user");
       return false;
     }
 
@@ -76,28 +74,26 @@ export const usePushNotifications = () => {
       }
 
       // Register push service worker
-      const registration = await navigator.serviceWorker.register("/sw-push.js", {
-        scope: "/",
-      });
+      const registration = await navigator.serviceWorker.register("/sw-push.js", { scope: "/" });
       await navigator.serviceWorker.ready;
+
+      const { data: vapidData, error: vapidError } = await api.get<{ publicKey: string }>("/push/vapid-public-key");
+      if (vapidError || !vapidData?.publicKey) {
+        console.error("Cannot subscribe: missing backend VAPID public key", vapidError);
+        setState((prev) => ({ ...prev, isLoading: false }));
+        return false;
+      }
 
       // Subscribe to push manager
       const subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: VAPID_PUBLIC_KEY,
+        applicationServerKey: urlBase64ToUint8Array(vapidData.publicKey),
       });
 
       const subscriptionJson = subscription.toJSON();
 
-      // Save subscription to database
-      const { error } = await db.from("push_subscriptions").upsert({
-        user_id: user.id,
-        endpoint: subscriptionJson.endpoint!,
-        p256dh: subscriptionJson.keys!.p256dh,
-        auth: subscriptionJson.keys!.auth,
-      }, {
-        onConflict: "user_id,endpoint",
-      });
+      // Save subscription through backend API
+      const { error } = await api.post<{ success: boolean }>("/push/subscribe", subscriptionJson);
 
       if (error) {
         console.error("Error saving subscription:", error);
@@ -133,12 +129,13 @@ export const usePushNotifications = () => {
       if (subscription) {
         await subscription.unsubscribe();
 
-        // Remove from database
-        await db
-          .from("push_subscriptions")
-          .delete()
-          .eq("user_id", user.id)
-          .eq("endpoint", subscription.endpoint);
+        // Remove from database through backend API
+        const { error } = await api.delete<{ success: boolean }>("/push/unsubscribe", {
+          endpoint: subscription.endpoint,
+        });
+        if (error) {
+          throw new Error(error.message || "Failed to remove subscription");
+        }
       }
 
       setState((prev) => ({

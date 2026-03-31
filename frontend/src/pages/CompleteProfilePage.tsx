@@ -88,6 +88,7 @@ const CompleteProfilePage = () => {
   const [phone, setPhone] = useState(IN_PHONE_PREFIX);
   const [bio, setBio] = useState("");
   const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [dateOfBirth, setDateOfBirth] = useState("");
   const [joiningDate, setJoiningDate] = useState("");
   const [skills, setSkills] = useState<string[]>([]);
   const [skillInput, setSkillInput] = useState("");
@@ -248,6 +249,10 @@ const CompleteProfilePage = () => {
       toast.error("Please add at least one skill");
       return;
     }
+    if (!dateOfBirth) {
+      toast.error("Date of birth is required");
+      return;
+    }
     if (!joiningDate) {
       toast.error("Joining date is required");
       return;
@@ -264,6 +269,7 @@ const CompleteProfilePage = () => {
         phone,
         bio,
         linkedin_url: linkedinUrl || undefined,
+        date_of_birth: dateOfBirth,
         joining_date: joiningDate,
         avatar_url: avatarUrl,
         resume_url: resumeUrl || undefined,
@@ -525,11 +531,24 @@ const CompleteProfilePage = () => {
           </div>
         </motion.div>
 
-        {/* Joining Date */}
+        {/* Date of Birth */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.18 }}
+          className="space-y-2"
+        >
+          <Label className="text-sm font-medium flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5" /> Date of Birth <span className="text-destructive">*</span>
+          </Label>
+          <Input type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+        </motion.div>
+
+        {/* Joining Date */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
           className="space-y-2"
         >
           <Label className="text-sm font-medium flex items-center gap-1.5">

@@ -15,6 +15,7 @@ router.post('/reset-database', adminController.resetDatabase);
 
 router.get('/employees/:userId/projects', adminController.getEmployeeProjects);
 router.get('/employees/:userId/stats', adminController.getEmployeeStats);
+router.patch('/employees/:userId/role', adminController.updateEmployeeRole);
 
 router.get('/task-templates', adminController.getTaskTemplates);
 router.get('/task-templates/job-titles', adminController.getTaskTemplateJobTitles);

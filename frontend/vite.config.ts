@@ -23,7 +23,7 @@ export default defineConfig(({ mode }) => ({
         srcDir: "public",
         filename: "sw.js",
         registerType: "autoUpdate",
-        includeAssets: ["favicon.ico", "robots.txt"],
+        includeAssets: ["cachelogo2.png", "robots.txt"],
         manifest: {
           name: "CacheTask - Employee Performance",
           short_name: "CacheTask",
@@ -35,9 +35,8 @@ export default defineConfig(({ mode }) => ({
           scope: "/",
           start_url: "/",
           icons: [
-            { src: "/pwa-192x192.png", sizes: "192x192", type: "image/png" },
-            { src: "/pwa-512x512.png", sizes: "512x512", type: "image/png" },
-            { src: "/pwa-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+            { src: "/cachelogo2.png", sizes: "512x512", type: "image/png" },
+            { src: "/cachelogo2.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
           ],
         },
       }),

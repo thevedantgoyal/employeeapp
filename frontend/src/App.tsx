@@ -9,6 +9,7 @@ import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ProfileCompletionGuard } from "@/components/auth/ProfileCompletionGuard";
 import { AdminRoute } from "@/components/auth/AdminRoute";
 import { OrganizationRoute } from "@/components/auth/OrganizationRoute";
+import { ManagerRoute } from "@/components/auth/ManagerRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 import SplashScreen from "@/components/SplashScreen";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";
@@ -110,7 +111,7 @@ const App = () => {
                   <Route path="/requests" element={<ProtectedWithLayout><RequestsPage /></ProtectedWithLayout>} />
                   <Route path="/requests/:requestId" element={<ProtectedWithLayout><RequestsPage /></ProtectedWithLayout>} />
                   <Route path="/projects" element={<ProtectedWithLayout><ProjectsRouteGuard /></ProtectedWithLayout>} />
-                  <Route path="/manager" element={<ProtectedWithLayout><ManagerDashboard /></ProtectedWithLayout>} />
+                  <Route path="/manager" element={<ManagerRoute><AppLayout><ManagerDashboard /></AppLayout></ManagerRoute>} />
                   <Route path="/reports" element={<OrganizationRoute><AppLayout><ReportsPage /></AppLayout></OrganizationRoute>} />
                   <Route path="/admin" element={<AdminRoute><AppLayout><AdminDashboard /></AppLayout></AdminRoute>} />
                   <Route path="/admin/employees/:id" element={<AdminRoute><AppLayout><AdminEmployeeDetailPage /></AppLayout></AdminRoute>} />

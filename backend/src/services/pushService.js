@@ -30,8 +30,8 @@ export async function sendPushToUser(userId, payload) {
       title: payload.title,
       body: payload.body,
       link: payload.link || '/',
-      icon: payload.icon || '/pwa-192x192.png',
-      badge: '/pwa-192x192.png',
+      icon: payload.icon || '/cachelogo2.png',
+      badge: '/cachelogo2.png',
       timestamp: Date.now(),
     });
 

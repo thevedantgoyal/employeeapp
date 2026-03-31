@@ -7,6 +7,12 @@ import { sendPushToUser } from '../services/pushService.js';
 const router = Router();
 router.use(authenticate);
 
+function isSubadmin(req) {
+  const role = (req.profile?.external_role || '').toString().trim().toLowerCase();
+  const subRole = req.profile?.external_sub_role != null && String(req.profile.external_sub_role).trim() !== '';
+  return role === 'subadmin' || subRole;
+}
+
 /**
  * POST /projects
  * Create project and insert ALL assigned members (managers + employees) in a transaction.
@@ -14,6 +20,9 @@ router.use(authenticate);
  */
 router.post('/', async (req, res, next) => {
   try {
+    if (isSubadmin(req)) {
+      return res.status(403).json({ data: null, error: { message: 'Senior Managers cannot create projects' } });
+    }
     const currentUserId = req.userId;
     const creatorProfileId = normalizeUUID(req.profileId);
     if (!creatorProfileId || !currentUserId) {
@@ -26,6 +35,25 @@ router.post('/', async (req, res, next) => {
     const assignedIds = Array.isArray(employeeIds)
       ? normalizeUUIDArray(employeeIds).filter(Boolean)
       : [];
+    if (assignedIds.length > 0) {
+      const { rows: blockedMembers } = await query(
+        `SELECT p.id, p.full_name
+         FROM profiles p
+         WHERE p.id = ANY($1::uuid[])
+           AND (
+             LOWER(TRIM(COALESCE(p.external_role, ''))) = 'subadmin'
+             OR (p.external_sub_role IS NOT NULL AND TRIM(COALESCE(p.external_sub_role, '')) != '')
+           )`,
+        [assignedIds]
+      );
+      if (blockedMembers.length > 0) {
+        return res.status(400).json({
+          data: null,
+          error: { message: 'Senior Managers cannot be added to projects' },
+        });
+      }
+    }
+
     const projectType = project_type === 'client' ? 'client' : 'inhouse';
     const dueDate = due_date && String(due_date).trim() !== '' ? String(due_date).trim() : null;
 
@@ -246,7 +274,37 @@ router.get('/:projectId/members', async (req, res, next) => {
               pm.created_at AS joined_at
        FROM project_members pm
        JOIN profiles p ON p.id = pm.employee_id
-       WHERE pm.project_id = $1 AND p.user_id != $2
+       WHERE pm.project_id = $1
+         AND p.user_id != $2
+         AND LOWER(TRIM(COALESCE(p.status, ''))) != 'inactive'
+         AND LOWER(TRIM(COALESCE(p.external_role, 'employee'))) IN ('manager', 'employee')
+       ORDER BY CASE WHEN LOWER(TRIM(COALESCE(p.external_role, ''))) = 'manager' THEN 1 ELSE 2 END,
+                p.full_name ASC`,
+      [projectId, currentUserId]
+    );
+    res.json({ data: rows, error: null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/:projectId/members/assignable', async (req, res, next) => {
+  try {
+    const projectId = normalizeUUID(req.params.projectId);
+    const currentUserId = req.userId;
+    if (!projectId || !currentUserId) {
+      return res.status(400).json({ data: null, error: { message: 'Project ID and authentication required' } });
+    }
+    const { rows } = await query(
+      `SELECT p.id, p.user_id, p.full_name, p.job_title, p.avatar_url, p.employee_code,
+              COALESCE(LOWER(TRIM(p.external_role)), 'employee') AS external_role,
+              pm.created_at AS joined_at
+       FROM project_members pm
+       JOIN profiles p ON p.id = pm.employee_id
+       WHERE pm.project_id = $1
+         AND p.user_id != $2
+         AND LOWER(TRIM(COALESCE(p.status, ''))) != 'inactive'
+         AND LOWER(TRIM(COALESCE(p.external_role, 'employee'))) IN ('manager', 'employee')
        ORDER BY CASE WHEN LOWER(TRIM(COALESCE(p.external_role, ''))) = 'manager' THEN 1 ELSE 2 END,
                 p.full_name ASC`,
       [projectId, currentUserId]

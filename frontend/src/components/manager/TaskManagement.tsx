@@ -88,7 +88,13 @@ function parseDurationInput(value: string): number | null {
 
 type ViewMode = "list" | "kanban" | "swimlane" | "dashboard" | "gantt";
 
-export const TaskManagement = () => {
+export const TaskManagement = ({
+  autoOpenCreate = false,
+  onCreateHandled,
+}: {
+  autoOpenCreate?: boolean;
+  onCreateHandled?: () => void;
+}) => {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [filters, setFilters] = useState<TaskFilters>(defaultFilters);
   const [editingTask, setEditingTask] = useState<ManagedTask | null>(null);
@@ -189,6 +195,12 @@ export const TaskManagement = () => {
     () => availableEmployees.map((e) => e.id).filter(Boolean),
     [availableEmployees]
   );
+
+  useEffect(() => {
+    if (!autoOpenCreate) return;
+    setShowCreateForm(true);
+    onCreateHandled?.();
+  }, [autoOpenCreate, onCreateHandled]);
 
   useEffect(() => {
     if (availableEmployeeProfileIds.length === 0) {

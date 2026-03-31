@@ -315,14 +315,25 @@ export async function action(req, res, next) {
           current = rows[0]?.manager_id ?? null;
         }
       }
-      const allowed = ['job_title', 'department', 'location', 'manager_id', 'team_id'];
+      const allowed = ['job_title', 'department', 'location', 'manager_id', 'team_id', 'status'];
       const setClauses = [];
       const values = [];
       let i = 1;
+      const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       for (const key of allowed) {
         if (updates[key] === undefined) continue;
         setClauses.push(`${key} = $${i}`);
         values.push(updates[key]);
+        i++;
+      }
+      if (updates.assigned_task_template_ids !== undefined) {
+        const raw = updates.assigned_task_template_ids;
+        const arr = Array.isArray(raw)
+          ? raw.map((x) => String(x).trim()).filter(Boolean)
+          : [];
+        const valid = [...new Set(arr.filter((id) => uuidRe.test(id)))];
+        setClauses.push(`assigned_task_template_ids = $${i}::uuid[]`);
+        values.push(valid);
         i++;
       }
       if (setClauses.length === 0) return res.status(400).json({ error: 'No updates' });
@@ -337,10 +348,10 @@ export async function action(req, res, next) {
     if (action === 'assign-role') {
       const { user_id, role } = req.body;
       if (!user_id || !role) return res.status(400).json({ error: 'Missing user_id or role' });
-      const valid = ['employee', 'team_lead', 'manager', 'hr', 'admin', 'organization'];
+      const valid = ['employee', 'manager', 'subadmin'];
       if (!valid.includes(role)) return res.status(400).json({ error: 'Invalid role' });
-      await query('DELETE FROM user_roles WHERE user_id = $1', [user_id]);
-      await query('INSERT INTO user_roles (user_id, role) VALUES ($1, $2)', [user_id, role]);
+      await query('UPDATE users SET external_role = $1, updated_at = now() WHERE id = $2', [role, user_id]);
+      await query('UPDATE profiles SET external_role = $1, updated_at = now() WHERE user_id = $2', [role, user_id]);
       return res.json({ data: { message: 'Role assigned successfully' } });
     }
 
@@ -375,6 +386,24 @@ export async function action(req, res, next) {
     }
 
     return res.status(400).json({ data: null, error: 'Invalid action' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function updateEmployeeRole(req, res, next) {
+  try {
+    const userId = req.params.userId;
+    const role = (req.body?.role || '').toString().trim().toLowerCase();
+    if (!userId || !role) {
+      return res.status(400).json({ data: null, error: { message: 'Missing userId or role' } });
+    }
+    if (!['subadmin', 'manager', 'employee'].includes(role)) {
+      return res.status(400).json({ data: null, error: { message: 'Invalid role' } });
+    }
+    await query('UPDATE users SET external_role = $1, updated_at = now() WHERE id = $2', [role, userId]);
+    await query('UPDATE profiles SET external_role = $1, updated_at = now() WHERE user_id = $2', [role, userId]);
+    return res.json({ data: { message: 'Role updated successfully', role }, error: null });
   } catch (err) {
     next(err);
   }

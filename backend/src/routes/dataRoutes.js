@@ -303,9 +303,14 @@ router.post('/:table', async (req, res, next) => {
     }
 
     if (table === 'tasks') {
-      const canCreateTask = (req.roles && (req.roles.includes('manager') || req.roles.includes('team_lead') || req.roles.includes('admin'))) || req.userType === 'SENIOR_MANAGER';
+      const externalRole = (req.profile?.external_role || '').toString().trim().toLowerCase();
+      const hasSubRole = req.profile?.external_sub_role != null && String(req.profile.external_sub_role).trim() !== '';
+      const canCreateTask = (req.roles && req.roles.includes('admin'))
+        || externalRole === 'manager'
+        || externalRole === 'subadmin'
+        || hasSubRole;
       if (!canCreateTask) {
-        return res.status(403).json({ data: null, error: { message: 'Only managers can create tasks.' } });
+        return res.status(403).json({ data: null, error: { message: 'Employees cannot create tasks' } });
       }
       const taskType = row.task_type === 'separate_task' ? 'separate_task' : 'project_task';
       row.task_type = taskType;

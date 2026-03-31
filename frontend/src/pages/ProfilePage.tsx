@@ -67,6 +67,7 @@ type ProfileEditData = {
   phone: string;
   bio: string;
   linkedin_url: string;
+  date_of_birth: string;
   joining_date: string;
   job_title: string;
   location: string;
@@ -86,6 +87,7 @@ const ProfilePage = () => {
     phone: "",
     bio: "",
     linkedin_url: "",
+    date_of_birth: "",
     joining_date: "",
     job_title: "",
     location: "",
@@ -148,6 +150,7 @@ const ProfilePage = () => {
       phone: normalizeProfilePhoneForEdit(profile.phone),
       bio: String(profile.bio ?? ""),
       linkedin_url: String(profile.linkedin_url ?? ""),
+      date_of_birth: String(profile.date_of_birth ?? ""),
       joining_date: String(profile.joining_date ?? ""),
       job_title: String(profile.job_title ?? ""),
       location: String(profile.location ?? ""),
@@ -407,10 +410,25 @@ const ProfilePage = () => {
         </div>
       </motion.section>
 
-      {/* Joining Date & Resume */}
+      {/* Work Details */}
       <motion.section variants={itemVariants}>
         <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3 px-1">Work Details</h3>
         <div className="bg-card rounded-2xl divide-y divide-border shadow-soft border border-border/50 overflow-hidden">
+          <div className="flex items-center gap-4 p-4">
+            <div className="p-2 bg-primary/10 rounded-xl"><Calendar className="w-5 h-5 text-primary" /></div>
+            <div className="flex-1">
+              <p className="text-xs text-muted-foreground">Date of Birth</p>
+              {editing ? (
+                <Input type="date" value={editData.date_of_birth}
+                  onChange={(e) => setEditData({ ...editData, date_of_birth: e.target.value })}
+                  className="h-8 text-sm mt-0.5" />
+              ) : (
+                <p className="font-medium">
+                  {profile?.date_of_birth ? new Date(profile.date_of_birth).toLocaleDateString() : "Not set"}
+                </p>
+              )}
+            </div>
+          </div>
           <div className="flex items-center gap-4 p-4">
             <div className="p-2 bg-primary/10 rounded-xl"><Calendar className="w-5 h-5 text-primary" /></div>
             <div className="flex-1">
@@ -454,48 +472,26 @@ const ProfilePage = () => {
         </div>
       </motion.section>
 
-      {/* Team & Hierarchy (EMPLOYEE / MANAGER) or Organisation Role (SENIOR_MANAGER) */}
-      <motion.section variants={itemVariants}>
-        {userType === "SENIOR_MANAGER" ? (
-          <>
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3 px-1">Organisation Role</h3>
-            <div className="bg-card rounded-2xl shadow-soft border border-border/50 overflow-hidden">
-              <div className="flex items-center gap-4 p-4">
-                <div className="w-12 h-12 rounded-full overflow-hidden bg-primary/20 flex items-center justify-center flex-shrink-0">
-                  <Building2 className="w-6 h-6 text-primary" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold truncate">
-                    {profile?.external_sub_role || "Senior Management"}
-                  </p>
-                  <p className="text-sm text-muted-foreground">Senior Management</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Reports to no one · Top of reporting chain
-                  </p>
-                </div>
+      {/* Team & Hierarchy (hidden for SENIOR_MANAGER) */}
+      {userType !== "SENIOR_MANAGER" && (
+        <motion.section variants={itemVariants}>
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3 px-1">Team & Hierarchy</h3>
+          <div className="bg-card rounded-2xl shadow-soft border border-border/50 overflow-hidden">
+            {manager ? (
+              <ManagerCard
+                full_name={manager.full_name}
+                job_title={manager.job_title}
+                avatar_url={manager.avatar_url}
+              />
+            ) : (
+              <div className="p-6 text-center">
+                <Briefcase className="w-10 h-10 text-muted-foreground mx-auto mb-2" />
+                <p className="text-muted-foreground text-sm">No manager assigned</p>
               </div>
-            </div>
-          </>
-        ) : (
-          <>
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3 px-1">Team & Hierarchy</h3>
-            <div className="bg-card rounded-2xl shadow-soft border border-border/50 overflow-hidden">
-              {manager ? (
-                <ManagerCard
-                  full_name={manager.full_name}
-                  job_title={manager.job_title}
-                  avatar_url={manager.avatar_url}
-                />
-              ) : (
-                <div className="p-6 text-center">
-                  <Briefcase className="w-10 h-10 text-muted-foreground mx-auto mb-2" />
-                  <p className="text-muted-foreground text-sm">No manager assigned</p>
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </motion.section>
+            )}
+          </div>
+        </motion.section>
+      )}
 
       {/* Notification Settings */}
       <motion.section variants={itemVariants}>

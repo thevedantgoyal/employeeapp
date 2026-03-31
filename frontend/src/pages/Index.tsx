@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
 import { Plus, CheckCircle, Clock, TrendingUp, ListTodo, Users, SearchCheck, Send, Inbox } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { db } from "@/integrations/api/db";
 import { TaskCard } from "@/components/cards/TaskCard";
@@ -12,6 +12,7 @@ import { formatTaskDueLabel } from "@/hooks/useTasks";
 import { useUserRoles } from "@/hooks/useUserRoles";
 import { useMyRequests, usePendingRequestsCount } from "@/hooks/useRequests";
 import { Skeleton } from "@/components/ui/skeleton";
+import { isSubadmin } from "@/lib/authUtils";
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -28,6 +29,7 @@ const itemVariants = {
 
 const Index = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [profileName, setProfileName] = useState<string | null>(null);
 
@@ -39,6 +41,15 @@ const Index = () => {
 
   const canReviewContributions = hasAnyRole(["manager", "team_lead", "hr", "admin"]);
   const myPendingCount = myRequests.filter((r) => r.status === "pending").length;
+  const userType = (user as { userType?: string } | null)?.userType;
+  const isSeniorManager = isSubadmin(user);
+  const isManager = userType === "MANAGER";
+  const showFab = isSeniorManager || isManager;
+  const fabLabel = useMemo(() => {
+    if (isSeniorManager) return "Open task template";
+    if (isManager) return "Open manager section";
+    return "Add work update";
+  }, [isSeniorManager, isManager]);
 
   // Refetch request counts when dashboard gains focus (e.g. user navigates back)
   useEffect(() => {
@@ -77,6 +88,18 @@ const Index = () => {
     if (hour < 12) return "Good morning";
     if (hour < 18) return "Good afternoon";
     return "Good evening";
+  };
+
+  const handleFabClick = () => {
+    if (isSeniorManager) {
+      navigate("/manager?tab=tasks&create=1");
+      return;
+    }
+    if (isManager) {
+      navigate("/manager");
+      return;
+    }
+    setIsModalOpen(true);
   };
 
   return (
@@ -196,17 +219,21 @@ const Index = () => {
       </motion.div>
 
       {/* FAB */}
-      <motion.button
-        className="fixed bottom-6 right-4 w-14 h-14 rounded-full bg-primary text-primary-foreground shadow-elevated flex items-center justify-center transition-transform hover:scale-105 active:scale-95"
-        onClick={() => setIsModalOpen(true)}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        initial={{ opacity: 0, scale: 0 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ delay: 0.5, type: "spring" }}
-      >
-        <Plus className="w-6 h-6" />
-      </motion.button>
+      {showFab && (
+        <motion.button
+          className="fixed bottom-6 right-4 w-14 h-14 rounded-full bg-primary text-primary-foreground shadow-elevated flex items-center justify-center transition-transform hover:scale-105 active:scale-95"
+          onClick={handleFabClick}
+          aria-label={fabLabel}
+          title={fabLabel}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          initial={{ opacity: 0, scale: 0 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.5, type: "spring" }}
+        >
+          <Plus className="w-6 h-6" />
+        </motion.button>
+      )}
 
       <AddWorkUpdateModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
     </>

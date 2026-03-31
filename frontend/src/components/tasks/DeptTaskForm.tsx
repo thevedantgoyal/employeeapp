@@ -28,6 +28,8 @@ const CUSTOM_TITLE_VALUE = "__custom__";
 /** Display names for department dropdown (value sent to API unchanged). */
 const DEPARTMENT_DISPLAY_NAMES: Record<string, string> = {
   "Data&Ai": "Data & AI",
+  "Cybersecurity": "Cybersecurity",
+  "Security": "Cybersecurity",
   "IT Help Desk": "IT Help Desk",
   "SCM": "Supply Chain Management (SCM)",
   "HR": "Human Resources",
@@ -58,6 +60,8 @@ type Assignee = {
   avatar_url: string | null;
   employee_code: string | null;
   department: string | null;
+  /** When non-empty, task creation shows only these template ids (per admin). */
+  assigned_task_template_ids?: string[] | null;
   fit_score?: number;
   matched_skills?: number;
   fit_label?: "best_fit" | "good_fit" | "possible_fit" | "no_match";
@@ -97,7 +101,36 @@ export function DeptTaskForm({ onSuccess, onCancel }: DeptTaskFormProps) {
     Record<string, { title: string; due_date: string; duration_hours: number | null }>
   >({});
 
-  const taskTitle = selectedTemplateId === CUSTOM_TITLE_VALUE ? customTitle.trim() : (templates.find((t) => t.id === selectedTemplateId)?.task_title ?? "");
+  const flatAssignees = useMemo(() => {
+    const out: Assignee[] = [];
+    Object.values(assigneesGrouped).forEach((arr) => arr.forEach((a) => out.push(a)));
+    return out;
+  }, [assigneesGrouped]);
+
+  const visibleTemplates = useMemo(() => {
+    if (!templates.length) return [];
+    if (selectedProfileIds.length === 0) return templates;
+    const selected = selectedProfileIds
+      .map((id) => flatAssignees.find((a) => a.id === id))
+      .filter(Boolean) as Assignee[];
+    if (selected.length === 0) return templates;
+    const perAssignee = selected.map((a) => {
+      const ids = a.assigned_task_template_ids;
+      return Array.isArray(ids) && ids.length > 0 ? ids : null;
+    });
+    if (perAssignee.some((x) => x == null)) return templates;
+    let inter = new Set(perAssignee[0]);
+    for (let k = 1; k < perAssignee.length; k++) {
+      inter = new Set([...inter].filter((id) => perAssignee[k]!.includes(id)));
+    }
+    const filtered = templates.filter((t) => inter.has(t.id));
+    return filtered.length > 0 ? filtered : templates;
+  }, [templates, selectedProfileIds, flatAssignees]);
+
+  const taskTitle =
+    selectedTemplateId === CUSTOM_TITLE_VALUE
+      ? customTitle.trim()
+      : (visibleTemplates.find((t) => t.id === selectedTemplateId)?.task_title ?? "");
 
   useEffect(() => {
     let cancelled = false;
@@ -152,9 +185,11 @@ export function DeptTaskForm({ onSuccess, onCancel }: DeptTaskFormProps) {
     }
     let cancelled = false;
     setLoadingAssignees(true);
-    const jobTitles = showAllInDept ? null : jobTitlesFilter;
+    const isCustom = selectedTemplateId === CUSTOM_TITLE_VALUE || !selectedTemplateId;
+    const jobTitles = showAllInDept || isCustom ? null : jobTitlesFilter;
     const q = new URLSearchParams({ department });
     if (jobTitles?.length) q.set("jobTitles", jobTitles.join(","));
+    if (isCustom) q.set("isCustom", "true");
     if (taskTitle) q.set("taskTitle", taskTitle);
     (async () => {
       const { data, error } = await api.get<GroupedAssignees>(`/tasks/assignees?${q.toString()}`);
@@ -167,7 +202,7 @@ export function DeptTaskForm({ onSuccess, onCancel }: DeptTaskFormProps) {
       setAssigneesGrouped(data || {});
     })();
     return () => { cancelled = true; };
-  }, [department, showAllInDept, jobTitlesFilter?.join(","), taskTitle]);
+  }, [department, showAllInDept, jobTitlesFilter?.join(","), taskTitle, selectedTemplateId]);
 
   useEffect(() => {
     if (selectedTemplate?.description_hint && !description) {
@@ -175,11 +210,12 @@ export function DeptTaskForm({ onSuccess, onCancel }: DeptTaskFormProps) {
     }
   }, [selectedTemplate?.description_hint]);
 
-  const flatAssignees = useMemo(() => {
-    const out: Assignee[] = [];
-    Object.values(assigneesGrouped).forEach((arr) => arr.forEach((a) => out.push(a)));
-    return out;
-  }, [assigneesGrouped]);
+  useEffect(() => {
+    if (!selectedTemplateId || selectedTemplateId === CUSTOM_TITLE_VALUE) return;
+    if (!visibleTemplates.some((t) => t.id === selectedTemplateId)) {
+      setSelectedTemplateId("");
+    }
+  }, [visibleTemplates, selectedTemplateId]);
 
   const filteredFlat = useMemo(() => {
     if (!assigneeSearch.trim()) return flatAssignees;
@@ -338,7 +374,7 @@ export function DeptTaskForm({ onSuccess, onCancel }: DeptTaskFormProps) {
             className="w-full p-3 pr-10 rounded-xl border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 appearance-none"
           >
             <option value="">Select template</option>
-            {(templates || []).map((t) => (
+            {(visibleTemplates || []).map((t) => (
               <option key={t.id} value={t.id}>{t.task_title}</option>
             ))}
             <option value={CUSTOM_TITLE_VALUE}>— Custom task title —</option>
